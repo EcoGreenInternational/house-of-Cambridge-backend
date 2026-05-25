@@ -7,14 +7,12 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
+
 app.use(cors());
 app.use(express.json());
 
-// Connect Database
 connectDB();
 
-// Test route
 app.get("/", (req, res) => {
   res.send("House of Cambridge API is running...");
 });
