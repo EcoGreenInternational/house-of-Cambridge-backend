@@ -25,14 +25,14 @@ const brandSchema = new mongoose.Schema(
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 brandSchema.index({ category: 1, isActive: 1 });
-brandSchema.pre('validate', function (next) {
-  if (!this.slug && this.name) {
-    this.slug = this.name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-  }
-  next();
-});
+// brandSchema.pre('validate', function (next) {
+//   if (!this.slug && this.name) {
+//     this.slug = this.name
+//       .toLowerCase()
+//       .trim()
+//       .replace(/[^a-z0-9]+/g, '-')
+//       .replace(/(^-|-$)/g, '');
+//   }
+//   next();
+// });
 export default mongoose.model('Brand', brandSchema);
