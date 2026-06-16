@@ -7,7 +7,7 @@ import connectDB from './config/db.js';
 import errorHandler from './middleware/errorHandler.js';
 import { requestLogger } from './utils/logger.js';
 import { apiLimiter } from './utils/rateLimiter.js';
-
+import './config/firebaseAdmin.js';
 import authRoutes    from './routes/authRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import cartRoutes    from './routes/cartRoutes.js';
@@ -71,7 +71,7 @@ const mongoSanitize = (req, _res, next) => {
   if (req.body && typeof req.body === 'object') {
     req.body = sanitiseObject(req.body);
   }
-  // Mutate query values in-place — req.query is a read-only getter in newer Express
+  
   if (req.query && typeof req.query === 'object') {
     for (const key of Object.keys(req.query)) {
       req.query[key] = sanitiseValue(req.query[key]);

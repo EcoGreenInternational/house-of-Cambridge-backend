@@ -28,7 +28,7 @@ router.post(
 
 router.post(
   '/google',
-  body('accessToken').notEmpty().trim(),
+  body('idToken').notEmpty().trim(),   
   validate,
   ctrl.googleAuth,
 );

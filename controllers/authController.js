@@ -100,9 +100,10 @@ export const verifyEmail = async (req, res, next) => {
 
 export const googleAuth = async (req, res, next) => {
   try {
-    const accessToken = typeof req.body.accessToken === 'string' ? req.body.accessToken.trim() : '';
-    if (!accessToken) return next(new ErrorResponse('Access token is required', 400));
-    const user = await authService.googleAuth(accessToken);
+    
+    const idToken = typeof req.body.idToken === 'string' ? req.body.idToken.trim() : '';
+    if (!idToken) return next(new ErrorResponse('ID token is required', 400));
+    const user = await authService.googleAuth(idToken);
     return sendToken(user, 200, res);
   } catch (err) {
     return next(err);

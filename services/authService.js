@@ -3,6 +3,7 @@ import User from '../model/User.js';
 import ErrorResponse from '../utils/errorResponse.js';
 import sendEmail from '../utils/sendEmail.js';
 import * as userRepo from '../repositories/userRepository.js';
+import admin from 'firebase-admin';
 
 const EMAIL_RE        = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TOKEN_RE        = /^[a-f0-9]{40,64}$/i;
@@ -145,28 +146,26 @@ export const verifyEmail = async (token) => {
   return user;
 };
 
-export const googleAuth = async (accessToken) => {
-  if (!accessToken || typeof accessToken !== 'string') {
-    throw new ErrorResponse('Access token is required', 400);
+export const googleAuth = async (idToken) => {
+  if (!idToken || typeof idToken !== 'string') {
+    throw new ErrorResponse('ID token is required', 400);
   }
 
-  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (!res.ok) throw new ErrorResponse('Invalid Google token', 401);
-
-  const { sub: googleId, email, name, picture } = await res.json();
-
-  if (!googleId || typeof googleId !== 'string') {
-    throw new ErrorResponse('Incomplete Google profile', 400);
+  
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(idToken);
+  } catch {
+    throw new ErrorResponse('Invalid or expired Google token', 401);
   }
-  if (!email || !EMAIL_RE.test(email)) {
-    throw new ErrorResponse('Google account has no valid email', 400);
-  }
+
+  const { uid: googleId, email, name, picture } = decoded;
+
+  if (!googleId) throw new ErrorResponse('Incomplete Google profile', 400);
+  if (!email || !EMAIL_RE.test(email)) throw new ErrorResponse('Google account has no valid email', 400);
 
   const normEmail = email.trim().toLowerCase();
-  let user        = await User.findOne({ $or: [{ googleId }, { email: normEmail }] }).select('+password');
+  let user = await User.findOne({ $or: [{ googleId }, { email: normEmail }] }).select('+password');
 
   if (user) {
     if (!user.googleId) {
@@ -186,6 +185,7 @@ export const googleAuth = async (accessToken) => {
     avatar:     { public_id: '', url: sanitisePictureUrl(picture) },
   });
 };
+
 
 export const facebookAuth = async (accessToken) => {
   if (!accessToken || typeof accessToken !== 'string') {
