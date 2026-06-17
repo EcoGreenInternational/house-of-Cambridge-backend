@@ -4,6 +4,7 @@ import Address from '../model/Address.js';
 import Wishlist from '../model/Wishlist.js';
 import Notification from '../model/Notification.js';
 import ErrorResponse from '../utils/errorResponse.js';
+import { STATES } from 'mongoose';
 
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
@@ -66,10 +67,12 @@ const sanitiseAddress = (body) => {
     addressLine1: body.addressLine1.trim().slice(0, 200),
     addressLine2: typeof body.addressLine2 === 'string' ? body.addressLine2.trim().slice(0, 200) : '',
     city:         body.city.trim().slice(0, 100),
+    state:        body.state.trim().slice(0, 100),
     postalCode:   body.postalCode.trim().slice(0, 20),
     country:      body.country.trim().slice(0, 100),
     phone:        typeof body.phone === 'string' ? body.phone.trim().slice(0, 20) : '',
     isDefault:    body.isDefault === true || body.isDefault === 'true',
+    label:        ['Home', 'Work', 'Other'].includes(body.label) ? body.label : 'Home',
   };
 };
 
