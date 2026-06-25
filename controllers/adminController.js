@@ -13,10 +13,19 @@ import { uploadBuffer, deleteResource } from '../utils/cloudinaryHelper.js';
 import ErrorResponse from '../utils/errorResponse.js';
 import sendEmail from '../utils/sendEmail.js';
 import * as productService from '../services/productService.js';
+import { awardLoyaltyPoints } from '../utils/loyaltyHelper.js';
+import LoyaltyTransaction from '../model/LoyaltyTransaction.js';
+import { 
+  ORDER_STATUSES, 
+  PAYMENT_STATUSES, 
+  RETURN_STATUSES, 
+  RETURN_REASONS,
+  ALLOWED_RESOLUTIONS 
+} from '../constants/order.js';
 
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
-const SLUG_RE      = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const EMAIL_RE     = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const VALID_ORDER_STATUSES   = Object.freeze(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'return_requested', 'returned']);
 const VALID_PAYMENT_STATUSES = Object.freeze(['pending', 'paid', 'failed', 'refunded']);
@@ -312,38 +321,34 @@ export const createAdmin = async (req, res, next) => {
   } catch (err) { return next(err); }
 };
 
+
 export const getOrders = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePage(req.query);
-    const { status, from, to } = req.query;
+    const { status } = req.query;
     const search = sanitiseRegex(req.query.search);
 
     const query = {};
     if (status) {
-      if (!VALID_ORDER_STATUSES.includes(status)) return next(new ErrorResponse('Invalid status filter', 400));
+      if (!VALID_ORDER_STATUSES.includes(status)) {
+        return next(new ErrorResponse(`Invalid status. Must be one of: ${VALID_ORDER_STATUSES.join(', ')}`, 400));
+      }
       query.orderStatus = status;
     }
-    if (search) query.$or = [
-      { orderNumber: { $regex: search, $options: 'i' } },
-      { guestEmail:  { $regex: search, $options: 'i' } },
-    ];
-    if (from || to) {
-      query.createdAt = {};
-      if (from) {
-        const d = new Date(from);
-        if (isNaN(d.getTime())) return next(new ErrorResponse('Invalid from date', 400));
-        query.createdAt.$gte = d;
-      }
-      if (to) {
-        const d = new Date(to);
-        if (isNaN(d.getTime())) return next(new ErrorResponse('Invalid to date', 400));
-        d.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = d;
-      }
+    if (search) {
+      query.$or = [
+        { orderNumber: { $regex: search, $options: 'i' } },
+        { guestEmail:  { $regex: search, $options: 'i' } },
+      ];
     }
 
     const [orders, total] = await Promise.all([
-      Order.find(query).populate('user', 'name email').sort('-createdAt').skip(skip).limit(limit).lean(),
+      Order.find(query)
+        .populate('user', 'name email')
+        .sort('-createdAt')
+        .skip(skip)
+        .limit(limit)
+        .lean(),
       Order.countDocuments(query),
     ]);
 
@@ -351,16 +356,26 @@ export const getOrders = async (req, res, next) => {
   } catch (err) { return next(err); }
 };
 
+
 export const getOrder = async (req, res, next) => {
   try {
-    validateObjectId(req.params.id, 'order ID');
+    const { id } = req.params;
 
-    const order = await Order.findById(req.params.id)
-      .populate('user', 'name email phone')
-      .populate('items.product', 'name images');
+    let order;
+    if (OBJECT_ID_RE.test(id)) {
+      order = await Order.findById(id);
+    } else {
+      order = await Order.findOne({ orderNumber: id.toUpperCase() });
+    }
+
     if (!order) return next(new ErrorResponse('Order not found', 404));
 
-    return res.json({ success: true, order });
+    const populated = await order.populate([
+      { path: 'user',          select: 'name email phone' },
+      { path: 'items.product', select: 'name images price' },
+    ]);
+
+    return res.json({ success: true, order: populated });
   } catch (err) { return next(err); }
 };
 
@@ -368,56 +383,64 @@ export const updateOrderStatus = async (req, res, next) => {
   try {
     validateObjectId(req.params.id, 'order ID');
 
-    const { status, paymentStatus } = req.body;
-    const trackingNumber = typeof req.body.trackingNumber === 'string' ? req.body.trackingNumber.trim().slice(0, 100) : undefined;
-    const adminNotes     = typeof req.body.adminNotes     === 'string' ? req.body.adminNotes.trim().slice(0, 500)     : undefined;
+    const { status, paymentStatus, trackingNumber, adminNotes } = req.body;
 
-    if (!status || !VALID_ORDER_STATUSES.includes(status)) {
-      return next(new ErrorResponse('Invalid status', 400));
+    if (!status || !ORDER_STATUSES.includes(status)) {
+      return next(new ErrorResponse(`Invalid status. Must be one of: ${ORDER_STATUSES.join(', ')}`, 400));
     }
-    if (paymentStatus && !VALID_PAYMENT_STATUSES.includes(paymentStatus)) {
+    if (paymentStatus && !PAYMENT_STATUSES.includes(paymentStatus)) {
       return next(new ErrorResponse('Invalid payment status', 400));
     }
 
     const currentOrder = await Order.findById(req.params.id);
     if (!currentOrder) return next(new ErrorResponse('Order not found', 404));
 
-    let resolvedPaymentStatus = paymentStatus ?? null;
-    if (!resolvedPaymentStatus) {
-      const isNonCod      = NON_COD_METHODS.has(currentOrder.paymentMethod);
-      const becomesActive = ['confirmed', 'processing', 'shipped', 'delivered'].includes(status);
-      if (isNonCod && becomesActive && currentOrder.paymentStatus === 'pending') {
-        resolvedPaymentStatus = 'paid';
-      } else if (status === 'delivered' && currentOrder.paymentMethod === 'cod') {
-        resolvedPaymentStatus = 'paid';
-      }
-    }
-
-    const update = {
+    const updateData = {
       orderStatus: status,
-      ...(trackingNumber        && { trackingNumber }),
-      ...(adminNotes            && { adminNotes }),
-      ...(resolvedPaymentStatus && { paymentStatus: resolvedPaymentStatus }),
-      ...(status === 'delivered' && { deliveredAt: new Date() }),
-      ...(status === 'cancelled' && { cancelledAt: new Date() }),
+      ...(trackingNumber && { trackingNumber: String(trackingNumber).trim().slice(0, 100) }),
+      ...(adminNotes && { adminNotes: String(adminNotes).trim().slice(0, 1000) }),
     };
 
-    const order = await Order.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' })
-      .populate('user', 'name email');
-    if (!order) return next(new ErrorResponse('Order not found', 404));
+   
+    if (paymentStatus) {
+      updateData.paymentStatus = paymentStatus;
+    } else if (status === 'delivered') {
+      updateData.paymentStatus = currentOrder.paymentMethod === 'cod' ? 'paid' : currentOrder.paymentStatus;
+      updateData.deliveredAt = new Date();
+    }
+    if (status === 'cancelled') updateData.cancelledAt = new Date();
 
+    const order = await Order.findByIdAndUpdate(req.params.id, updateData, { 
+      returnDocument: 'after' 
+    }).populate('user', 'name email');
+
+    if (status === 'delivered' && order.user && !order.loyaltyPointsEarned) {
+      await awardLoyaltyPoints({
+        userId: order.user._id,
+        reason: 'order',
+        refId: order._id,
+        refModel: 'Order',
+        desc: `Order #${order.orderNumber}`,
+      });
+      order.loyaltyPointsEarned = 1;
+      await order.save();
+    }
+
+    
     if (order.user) {
       Notification.create({
-        user:    order.user._id,
-        title:   'Order Status Updated',
-        message: `Your order #${order.orderNumber} is now: ${status.replace(/_/g, ' ')}.`,
-        type:    'order',
-        link:    `/track-order/${order._id}`,
+        user: order.user._id,
+        title: 'Order Status Updated',
+        message: `Your order #${order.orderNumber} is now ${status.replace(/_/g, ' ')}.`,
+        type: 'order',
+        link: `/track-order/${order._id}`,
       }).catch(() => {});
     }
 
     return res.json({ success: true, order });
-  } catch (err) { return next(err); }
+  } catch (err) {
+    return next(err);
+  }
 };
 
 export const getAdminProducts = async (req, res, next) => {
@@ -697,13 +720,34 @@ export const approveReview = async (req, res, next) => {
   try {
     validateObjectId(req.params.id, 'review ID');
     const adminNote = typeof req.body.adminNote === 'string' ? req.body.adminNote.trim().slice(0, 500) : '';
+
     const review = await Review.findByIdAndUpdate(
       req.params.id,
       { status: 'approved', adminNote },
       { returnDocument: 'after' },
-    );
+    ).populate('product', 'name');
     if (!review) return next(new ErrorResponse('Review not found', 404));
-    await productService.recalculateRatings(review.product);
+
+    await productService.recalculateRatings(review.product._id ?? review.product);
+
+    if (review.user) {
+      const alreadyRewarded = await LoyaltyTransaction.exists({
+        user:   review.user,
+        reason: 'review',
+        refId:  review._id,
+      });
+
+      if (!alreadyRewarded) {
+        await awardLoyaltyPoints({
+          userId:   review.user,
+          reason:   'review',
+          refId:    review._id,
+          refModel: 'Review',
+          desc:     `Review for "${review.product?.name ?? 'a product'}"`,
+        });
+      }
+    }
+
     return res.json({ success: true, review });
   } catch (err) { return next(err); }
 };
@@ -779,53 +823,60 @@ export const updateReturnStatus = async (req, res, next) => {
   try {
     validateObjectId(req.params.id, 'return ID');
 
-    const { status } = req.body;
-    if (!status || !VALID_RETURN_STATUSES.includes(status)) {
-      return next(new ErrorResponse('Invalid status', 400));
+    const { status, refundAmount, refundMethod, adminNotes } = req.body;
+
+    if (!status || !RETURN_STATUSES.includes(status)) {
+      return next(new ErrorResponse('Invalid return status', 400));
     }
 
-    const adminNotes   = typeof req.body.adminNotes  === 'string' ? req.body.adminNotes.trim().slice(0, 500) : undefined;
-    const refundMethod = typeof req.body.refundMethod === 'string' ? req.body.refundMethod.trim().slice(0, 50) : undefined;
-
-    let refundAmount;
-    if (req.body.refundAmount !== undefined) {
-      refundAmount = Number(req.body.refundAmount);
-      if (!Number.isFinite(refundAmount) || refundAmount < 0) {
-        return next(new ErrorResponse('Invalid refund amount', 400));
-      }
-    }
-
-    const update = {
-      status,
-      ...(adminNotes    !== undefined && { adminNotes }),
-      ...(refundAmount  !== undefined && { refundAmount }),
-      ...(refundMethod  !== undefined && { refundMethod }),
-      ...(status === 'refunded'       && { resolvedAt: new Date() }),
-    };
-
-    const ret = await Return.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' })
-      .populate('user', 'name email');
+    const ret = await Return.findById(req.params.id);
     if (!ret) return next(new ErrorResponse('Return not found', 404));
 
+    const updateData = {
+      status,
+      adminNotes:   adminNotes   ? String(adminNotes).trim().slice(0, 500)   : undefined,
+      refundMethod: refundMethod ? String(refundMethod).trim().slice(0, 50)  : undefined,
+    };
+
+    if (refundAmount !== undefined) {
+      const amt = Number(refundAmount);
+      if (!Number.isFinite(amt) || amt < 0) {
+        return next(new ErrorResponse('Invalid refund amount', 400));
+      }
+      updateData.refundAmount = amt;
+    }
+
+    if (status === 'refunded') updateData.resolvedAt = new Date();
+
+    const updatedReturn = await Return.findByIdAndUpdate(req.params.id, updateData, { 
+      returnDocument: 'after' 
+    }).populate('user', 'name email');
+
+    // Sync order status
     if (status === 'approved') {
       await Order.findByIdAndUpdate(ret.order, { orderStatus: 'return_requested' });
     }
     if (status === 'refunded') {
-      await Order.findByIdAndUpdate(ret.order, { orderStatus: 'returned', paymentStatus: 'refunded' });
+      await Order.findByIdAndUpdate(ret.order, { 
+        orderStatus:   'returned', 
+        paymentStatus: 'refunded',
+      });
     }
 
-    if (ret.user) {
+    if (updatedReturn.user) {
       Notification.create({
-        user:    ret.user._id,
+        user:    updatedReturn.user._id,
         title:   'Return Request Updated',
-        message: `Your return ${ret.returnId} status: ${status.replace(/_/g, ' ')}.`,
+        message: `Your return ${updatedReturn.returnId} is now ${status.replace(/_/g, ' ')}.`,
         type:    'return',
         link:    `/return-status/${ret.order}`,
       }).catch(() => {});
     }
 
-    return res.json({ success: true, return: ret });
-  } catch (err) { return next(err); }
+    return res.json({ success: true, return: updatedReturn });
+  } catch (err) {
+    return next(err);
+  }
 };
 
 export const deleteReturn = async (req, res, next) => {

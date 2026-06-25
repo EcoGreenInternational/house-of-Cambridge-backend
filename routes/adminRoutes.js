@@ -21,6 +21,15 @@ const logoUpload = multer({
   },
 });
 
+
+const orderIdParam = param('id')
+  .custom((val) => {
+    const mongoId = /^[a-f\d]{24}$/i.test(val);
+    const orderNum = /^HOC-\d{4}-\d{5}$/i.test(val);
+    if (!mongoId && !orderNum) throw new Error('Invalid order ID or order number');
+    return true;
+  });
+
 const mongoId = (name) => param(name).isMongoId();
 
 router.get('/dashboard', ...admin, ctrl.getDashboardStats);
@@ -50,7 +59,9 @@ router.post(
 );
 
 router.get('/orders', ...admin, ctrl.getOrders);
-router.get('/orders/:id', ...admin, mongoId('id'), validate, ctrl.getOrder);
+
+router.get('/orders/:id', ...admin, orderIdParam, validate, ctrl.getOrder);
+
 router.put(
   '/orders/:id/status',
   ...admin,

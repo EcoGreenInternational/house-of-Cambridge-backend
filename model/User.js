@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: [true, 'Please enter your name'], trim: true, maxlength: 100 },
@@ -28,7 +29,13 @@ const userSchema = new mongoose.Schema(
     language: { type: String, default: 'English', maxlength: 50 },
     isVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
-    loyaltyPoints: { type: Number, default: 0, min: 0 },
+
+    
+    loyaltyPoints:      { type: Number, default: 0, min: 0 },
+    totalOrdersEarned:  { type: Number, default: 0, min: 0 }, 
+    totalReviewsEarned: { type: Number, default: 0, min: 0 }, 
+  
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpire: { type: Date, select: false },
@@ -37,29 +44,36 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
 userSchema.index({ role: 1 });
+
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
 });
+
 userSchema.methods.comparePassword = function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
 };
+
 userSchema.methods.getJwtToken = function () {
   return jwt.sign({ id: this._id, role: this.role }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || '7d',
   });
 };
+
 userSchema.methods.getResetPasswordToken = function () {
   const resetToken = crypto.randomBytes(32).toString('hex');
   this.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
   this.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
   return resetToken;
 };
+
 userSchema.methods.getEmailVerificationToken = function () {
   const token = crypto.randomBytes(32).toString('hex');
   this.emailVerificationToken = crypto.createHash('sha256').update(token).digest('hex');
   this.emailVerificationExpire = Date.now() + 24 * 60 * 60 * 1000;
   return token;
 };
+
 export default mongoose.model('User', userSchema);

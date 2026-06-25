@@ -17,6 +17,7 @@ import adminRoutes   from './routes/adminRoutes.js';
 import uploadRoutes  from './routes/uploadRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import brandRoutes   from './routes/brandRoutes.js';
+import loyaltyRoutes from './routes/loyaltyRoutes.js';
 
 connectDB();
 
@@ -37,15 +38,9 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
 
-// ── Custom mongo-sanitize ────────────────────────────────────────────────────
-// Removes $ from VALUES (MongoDB injection) and $ from KEYS (dot-notation attack).
-// Does NOT strip dots from values — dots are safe in values (e.g. email addresses).
-// Does NOT replace req.query — mutates in-place to avoid read-only getter error
-// in newer Express/router versions.
-// ─────────────────────────────────────────────────────────────────────────────
+
 const sanitiseValue = (value) => {
   if (typeof value === 'string') {
-    // Only strip $ from values — dots are valid in emails, URLs, filenames, etc.
     return value.replace(/\$/g, '');
   }
   if (Array.isArray(value)) {
@@ -60,7 +55,6 @@ const sanitiseValue = (value) => {
 const sanitiseObject = (obj) => {
   const result = {};
   for (const key of Object.keys(obj)) {
-    // Strip both $ and . from KEYS to block operator injection (e.g. $where, a.b)
     const safeKey = key.replace(/[$.]/, '');
     result[safeKey] = sanitiseValue(obj[key]);
   }
@@ -71,7 +65,6 @@ const mongoSanitize = (req, _res, next) => {
   if (req.body && typeof req.body === 'object') {
     req.body = sanitiseObject(req.body);
   }
-  
   if (req.query && typeof req.query === 'object') {
     for (const key of Object.keys(req.query)) {
       req.query[key] = sanitiseValue(req.query[key]);
@@ -86,7 +79,7 @@ const mongoSanitize = (req, _res, next) => {
 };
 
 app.use(mongoSanitize);
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 app.use(requestLogger);
 app.use('/api', apiLimiter);
@@ -100,6 +93,7 @@ app.use('/api/admin',    adminRoutes);
 app.use('/api/upload',   uploadRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/brands',   brandRoutes);
+app.use('/api/loyalty',  loyaltyRoutes);  
 
 app.use(errorHandler);
 
