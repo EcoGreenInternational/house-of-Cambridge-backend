@@ -53,7 +53,7 @@ router.post(
 
 router.put(
   '/reset-password/:token',
-  param('token').isHexadecimal().isLength({ min: 40, max: 40 }),
+  param('token').isHexadecimal().isLength({ min: 40, max: 64 }),
   body('password').isLength({ min: 8, max: 128 }),
   validate,
   ctrl.resetPassword,
@@ -61,7 +61,7 @@ router.put(
 
 router.get(
   '/verify-email/:token',
-  param('token').isHexadecimal().isLength({ min: 40, max: 40 }),
+  param('token').isHexadecimal().isLength({ min: 40, max: 64 }),
   validate,
   ctrl.verifyEmail,
 );
