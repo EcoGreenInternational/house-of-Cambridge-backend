@@ -41,6 +41,7 @@ const userSchema = new mongoose.Schema(
     resetPasswordExpire: { type: Date, select: false },
     emailVerificationToken: { type: String, select: false },
     emailVerificationExpire: { type: Date, select: false },
+    refreshToken: { type: String, select: false },
   },
   { timestamps: true },
 );
@@ -58,8 +59,16 @@ userSchema.methods.comparePassword = function (enteredPassword) {
 
 userSchema.methods.getJwtToken = function () {
   return jwt.sign({ id: this._id, role: this.role }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || '7d',
+    expiresIn: process.env.JWT_EXPIRE || '1h',
   });
+};
+
+userSchema.methods.getRefreshToken = function () {
+  const refreshToken = jwt.sign({ id: this._id }, process.env.JWT_REFRESH_SECRET, {
+    expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d',
+  });
+  this.refreshToken = refreshToken; 
+  return refreshToken;
 };
 
 userSchema.methods.getResetPasswordToken = function () {

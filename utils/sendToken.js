@@ -10,21 +10,29 @@ const assertEnv = () => {
   return expireDays;
 };
 
-const sendToken = (user, statusCode, res) => {
+const sendToken = async (user, statusCode, res) => {
   const expireDays = assertEnv();
-  const token      = user.getJwtToken();
+  const token = user.getJwtToken();
+  const refreshToken = user.getRefreshToken();
+  await user.save({ validateBeforeSave: false }); 
 
-  const options = {
-    expires:  new Date(Date.now() + expireDays * 24 * 60 * 60 * 1_000),
+  const baseOptions = {
     httpOnly: true,
     secure:   IS_PROD,
     sameSite: IS_PROD ? 'strict' : 'lax',
     path:     '/',
   };
 
-  res
-    .status(statusCode)
-    .cookie('token', token, options)
+  res.status(statusCode)
+    .cookie('token', token, {
+      ...baseOptions,
+      expires: new Date(Date.now() + 60 * 60 * 1000), // match JWT_EXPIRE (1h)
+    })
+    .cookie('refreshToken', refreshToken, {
+      ...baseOptions,
+      expires: new Date(Date.now() + expireDays * 24 * 60 * 60 * 1000), // 30d (or align to 30d)
+      path: '/api/auth/refresh-token', 
+    })
     .json({
       success: true,
       user: {

@@ -152,6 +152,8 @@ cp frontend/.env.example frontend/.env
 | `MONGODB_URI` | MongoDB Atlas connection string |
 | `JWT_SECRET` | Long random secret for signing JWTs |
 | `JWT_EXPIRE` | JWT lifetime e.g. `7d` |
+| `JWT_REFRESH_SECRET` | Separate long random secret for refresh tokens |
+| `JWT_REFRESH_EXPIRE` | Refresh token lifetime e.g. `30d` |
 | `COOKIE_EXPIRE` | Cookie lifetime in days |
 | `SMTP_HOST` | SMTP server host e.g. `smtp.gmail.com` |
 | `SMTP_PORT` | SMTP port (587 for TLS) |

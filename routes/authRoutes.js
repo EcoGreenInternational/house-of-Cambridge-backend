@@ -42,6 +42,8 @@ router.post(
 
 router.post('/logout', ctrl.logout);
 
+router.post('/refresh-token', ctrl.refreshToken);
+
 router.get('/me', protect, ctrl.getMe);
 
 router.post(
