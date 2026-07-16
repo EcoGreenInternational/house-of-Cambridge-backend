@@ -92,7 +92,7 @@ const orderSchema = new mongoose.Schema(
 );
 
 
-orderSchema.pre('save', async function (next) {
+orderSchema.pre('save', async function () {
   if (!this.orderNumber) {
     const year      = new Date().getFullYear();
     const yearStart = new Date(year, 0, 1);
@@ -101,7 +101,6 @@ orderSchema.pre('save', async function (next) {
     });
     this.orderNumber = `HOC-${year}-${String(count + 1).padStart(5, '0')}`;
   }
-  next();
 });
 
 orderSchema.index({ user: 1, createdAt: -1 });
