@@ -43,7 +43,6 @@ const invoiceSchema = new mongoose.Schema(
 );
 
 // Indexing for faster admin table lookups
-invoiceSchema.index({ invoiceNo: 1 });
 invoiceSchema.index({ invoiceType: 1 });
 
 export default mongoose.model('Invoice', invoiceSchema);
