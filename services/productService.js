@@ -106,7 +106,7 @@ export const getProducts = async (queryStr) => {
   }
 
   const features = new ApiFeatures(
-    Product.find({ isActive: true }).populate('category', 'name slug'),
+    Product.find({ isActive: true }).populate('category', 'name slug').populate('brand', 'name slug'),
     processedQuery,
   ).search().filter().sort();
 

@@ -8,7 +8,7 @@ export const createInvoice = async (req, res, next) => {
   try {
     session.startTransaction();
 
-    const { invoiceType, items, discount = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, issuedBy } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, issuedBy } = req.body;
 
     if (!['online', 'manual'].includes(invoiceType)) {
       return next(new ErrorResponse('Invalid invoice type selection', 400));
@@ -80,8 +80,9 @@ export const createInvoice = async (req, res, next) => {
       }
     }
 
+    const finalDeliveryFee = Math.max(0, Number(deliveryFee) || 0);
     const taxAmount = Math.round((derivedSubtotal - discount) * (taxPercent / 100));
-    const totalAmountDue = derivedSubtotal - discount + taxAmount;
+    const totalAmountDue = derivedSubtotal - discount + taxAmount + finalDeliveryFee;
 
     const newInvoice = new Invoice({
       invoiceNo: finalInvoiceNo,
@@ -92,6 +93,7 @@ export const createInvoice = async (req, res, next) => {
       items: processItems,
       subtotal: derivedSubtotal,
       discount,
+      deliveryFee: finalDeliveryFee,
       taxPercent,
       taxAmount,
       totalAmountDue,
@@ -128,7 +130,7 @@ export const updateInvoice = async (req, res, next) => {
     session.startTransaction();
 
     const { id } = req.params;
-    const { invoiceType, items, discount = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople } = req.body;
 
     // 1. Fetch the existing invoice
     const invoice = await Invoice.findOne({ _id: id, isDeleted: { $ne: true } }).session(session);
@@ -212,11 +214,12 @@ export const updateInvoice = async (req, res, next) => {
     }
 
     // 4. Recalculate financial breakdown
-    const finalDiscount = discount !== undefined ? discount : invoice.discount;
-    const finalTaxPercent = taxPercent !== undefined ? taxPercent : invoice.taxPercent;
+    const finalDiscount = discount !== undefined ? Math.max(0, Number(discount) || 0) : invoice.discount;
+    const finalDeliveryFee = deliveryFee !== undefined ? Math.max(0, Number(deliveryFee) || 0) : invoice.deliveryFee;
+    const finalTaxPercent = taxPercent !== undefined ? Math.max(0, Number(taxPercent) || 0) : invoice.taxPercent;
     
     const taxAmount = Math.round((derivedSubtotal - finalDiscount) * (finalTaxPercent / 100));
-    const totalAmountDue = derivedSubtotal - finalDiscount + taxAmount;
+    const totalAmountDue = derivedSubtotal - finalDiscount + taxAmount + finalDeliveryFee;
 
     // 5. Apply standard fields to the document
     if (clientDetails) invoice.clientDetails = clientDetails;
@@ -226,6 +229,7 @@ export const updateInvoice = async (req, res, next) => {
     
     invoice.subtotal = derivedSubtotal;
     invoice.discount = finalDiscount;
+    invoice.deliveryFee = finalDeliveryFee;
     invoice.taxPercent = finalTaxPercent;
     invoice.taxAmount = taxAmount;
     invoice.totalAmountDue = totalAmountDue;
