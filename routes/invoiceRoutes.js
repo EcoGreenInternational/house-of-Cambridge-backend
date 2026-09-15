@@ -35,6 +35,10 @@ router.route('/')
       .isFloat({ min: 1 })
       .withMessage('Quantity must be at least 1')
       .toFloat(),
+    body('deliveryFee')
+      .optional({ nullable: true, checkFalsy: true })
+      .isFloat({ min: 0 })
+      .withMessage('Delivery fee must be a non-negative number'),
     validate,
     ctrl.createInvoice
   );
