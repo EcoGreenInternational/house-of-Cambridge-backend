@@ -42,6 +42,7 @@ const productSchema = new mongoose.Schema(
     ],
     variants: [
       {
+        variantCode: { type: String, trim: true, maxlength: 100 },
         sku: { type: String, trim: true, maxlength: 100 },
         name: { type: String, trim: true, maxlength: 200 },
         attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
