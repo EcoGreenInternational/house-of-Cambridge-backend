@@ -520,6 +520,8 @@ export const createProduct = async (req, res, next) => {
           : req.body.variants;
         if (Array.isArray(parsed)) {
           req.body.variants = parsed.map((v) => ({
+            ...(v._id ? { _id: v._id } : (v.id && String(v.id).match(/^[0-9a-fA-F]{24}$/) ? { _id: v.id } : {})),
+            variantCode: String(v.variantCode || '').trim().slice(0, 100),
             sku: String(v.sku || '').trim().slice(0, 100),
             name: String(v.name || '').trim().slice(0, 200),
             attributes: typeof v.attributes === 'object' && v.attributes !== null ? v.attributes : {},
@@ -595,6 +597,8 @@ export const updateProduct = async (req, res, next) => {
           : req.body.variants;
         if (Array.isArray(parsed)) {
           req.body.variants = parsed.map((v) => ({
+            ...(v._id ? { _id: v._id } : (v.id && String(v.id).match(/^[0-9a-fA-F]{24}$/) ? { _id: v.id } : {})),
+            variantCode: String(v.variantCode || '').trim().slice(0, 100),
             sku: String(v.sku || '').trim().slice(0, 100),
             name: String(v.name || '').trim().slice(0, 200),
             attributes: typeof v.attributes === 'object' && v.attributes !== null ? v.attributes : {},

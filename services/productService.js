@@ -267,10 +267,34 @@ export const updateProduct = async (id, data, files = []) => {
   const mainFiles = safeFiles.filter(
     (f) => f.fieldname === 'images' || (!f.fieldname?.startsWith('variant_image_'))
   );
+
+  let keptImages = product.images || [];
+  if (data.existingImages !== undefined) {
+    try {
+      const parsed = typeof data.existingImages === 'string' ? JSON.parse(data.existingImages) : data.existingImages;
+      if (Array.isArray(parsed)) {
+        keptImages = parsed;
+      }
+    } catch (e) {
+      keptImages = product.images || [];
+    }
+  }
+
   if (mainFiles.length) {
     const newImages = await uploadImages(mainFiles, 'products');
-    await deleteImages(product.images);
-    data.images = newImages;
+    const keptPublicIds = new Set(keptImages.map((img) => img.public_id).filter(Boolean));
+    const imagesToDelete = (product.images || []).filter((img) => img.public_id && !keptPublicIds.has(img.public_id));
+    if (imagesToDelete.length > 0) {
+      await deleteImages(imagesToDelete);
+    }
+    data.images = [...keptImages, ...newImages];
+  } else if (data.existingImages !== undefined) {
+    const keptPublicIds = new Set(keptImages.map((img) => img.public_id).filter(Boolean));
+    const imagesToDelete = (product.images || []).filter((img) => img.public_id && !keptPublicIds.has(img.public_id));
+    if (imagesToDelete.length > 0) {
+      await deleteImages(imagesToDelete);
+    }
+    data.images = keptImages;
   }
 
   if (!data.slug && data.name && data.name !== product.name) {
