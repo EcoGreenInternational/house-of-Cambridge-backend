@@ -32,6 +32,7 @@ const productSchema = new mongoose.Schema(
     isPreOwned: { type: Boolean, default: false },
     isNewArrival: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    showInUserView: { type: Boolean, default: true },
     weight: { type: Number, default: 0, min: 0 },
     usageInstructions: [{ type: String, maxlength: 500 }],
     variantAttributes: [
@@ -61,11 +62,11 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.index({ name: 'text', description: 'text', brand: 'text', tags: 'text' });
-productSchema.index({ category: 1, isActive: 1 });
+productSchema.index({ category: 1, isActive: 1, showInUserView: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ ratings: -1 });
-productSchema.index({ isActive: 1, isFeatured: 1 });
-productSchema.index({ isActive: 1, isFlashSale: 1 });
+productSchema.index({ isActive: 1, showInUserView: 1, isFeatured: 1 });
+productSchema.index({ isActive: 1, showInUserView: 1, isFlashSale: 1 });
 
 const Product = mongoose.model('Product', productSchema);
 

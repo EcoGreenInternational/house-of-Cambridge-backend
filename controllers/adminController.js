@@ -448,7 +448,7 @@ export const updateOrderStatus = async (req, res, next) => {
 export const getAdminProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePage(req.query);
-    const { category, isActive } = req.query;
+    const { category, isActive, showInUserView } = req.query;
     const search = sanitiseRegex(req.query.search);
 
     const query = {};
@@ -461,6 +461,9 @@ export const getAdminProducts = async (req, res, next) => {
       query.category = category;
     }
     if (isActive !== undefined) query.isActive = isActive === 'true';
+    if (showInUserView !== undefined) {
+      query.showInUserView = showInUserView === 'true' ? { $ne: false } : false;
+    }
 
     const [products, total] = await Promise.all([
       Product.find(query).populate('category', 'name').populate('brand', 'name').sort('-createdAt').skip(skip).limit(limit).lean(),

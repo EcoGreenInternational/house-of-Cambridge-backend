@@ -185,7 +185,7 @@ export const getCategories = async (req, res, next) => {
       return res.json({ success: true, count: categories.length, categories });
     }
 
-    const productFilter = { isActive: true };
+    const productFilter = { isActive: true, showInUserView: { $ne: false } };
     if (isPreOwned)   productFilter.isPreOwned   = true;
     if (isNewArrival) productFilter.isNewArrival = true;
 

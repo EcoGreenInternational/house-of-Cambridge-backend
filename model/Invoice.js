@@ -7,6 +7,9 @@ const invoiceSchema = new mongoose.Schema(
     invoiceDate: { type: Date, required: true, default: Date.now },
     dueDate: { type: Date },
     assignedPeople: { type: String, default: '' },
+    approvedByName: { type: String, default: '' },
+    approvedByDate: { type: Date, default: null },
+    approvedBySignature: { type: String, default: '' },
     clientDetails: {
       clientName: { type: String, required: true },
       companyName: { type: String, default: '' },

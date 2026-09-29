@@ -8,7 +8,7 @@ export const createInvoice = async (req, res, next) => {
   try {
     session.startTransaction();
 
-    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, issuedBy } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, approvedByName = '', approvedByDate, approvedBySignature = '', issuedBy } = req.body;
 
     if (!['online', 'manual'].includes(invoiceType)) {
       return next(new ErrorResponse('Invalid invoice type selection', 400));
@@ -89,6 +89,9 @@ export const createInvoice = async (req, res, next) => {
       invoiceType,
       dueDate,
       assignedPeople,
+      approvedByName,
+      approvedByDate: approvedByDate || null,
+      approvedBySignature,
       clientDetails,
       items: processItems,
       subtotal: derivedSubtotal,
@@ -130,7 +133,7 @@ export const updateInvoice = async (req, res, next) => {
     session.startTransaction();
 
     const { id } = req.params;
-    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, approvedByName, approvedByDate, approvedBySignature } = req.body;
 
     // 1. Fetch the existing invoice
     const invoice = await Invoice.findOne({ _id: id, isDeleted: { $ne: true } }).session(session);
@@ -225,6 +228,9 @@ export const updateInvoice = async (req, res, next) => {
     if (clientDetails) invoice.clientDetails = clientDetails;
     if (dueDate) invoice.dueDate = dueDate;
     if (assignedPeople) invoice.assignedPeople = assignedPeople;
+    if (approvedByName !== undefined) invoice.approvedByName = approvedByName;
+    if (approvedByDate !== undefined) invoice.approvedByDate = approvedByDate || null;
+    if (approvedBySignature !== undefined) invoice.approvedBySignature = approvedBySignature;
     if (items) invoice.items = processItems;
     
     invoice.subtotal = derivedSubtotal;

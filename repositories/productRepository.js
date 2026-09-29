@@ -15,13 +15,13 @@ export const remove = (id) => Product.findByIdAndDelete(id);
 export const count = (query) => Product.countDocuments(query);
 
 export const findFlashSale = (limit = 8) =>
-  Product.find({ isFlashSale: true, isActive: true, stock: { $gt: 0 } })
+  Product.find({ isFlashSale: true, isActive: true, showInUserView: { $ne: false }, stock: { $gt: 0 } })
     .limit(limit)
     .populate('category')
     .populate('brand', 'name slug');
 
 export const findFeatured = (limit = 8) =>
-  Product.find({ isFeatured: true, isActive: true })
+  Product.find({ isFeatured: true, isActive: true, showInUserView: { $ne: false } })
     .limit(limit)
     .populate('category')
     .populate('brand', 'name slug');
@@ -36,7 +36,7 @@ export const findPopular = async (limit = 8) => {
   ]);
 
   if (topItems.length === 0) {
-    return Product.find({ isActive: true })
+    return Product.find({ isActive: true, showInUserView: { $ne: false } })
       .sort({ numReviews: -1, ratings: -1 })
       .limit(limit)
       .populate('category')
@@ -44,7 +44,7 @@ export const findPopular = async (limit = 8) => {
   }
 
   const ids = topItems.map((i) => i._id);
-  const products = await Product.find({ _id: { $in: ids }, isActive: true }).populate('category').populate('brand', 'name slug');
+  const products = await Product.find({ _id: { $in: ids }, isActive: true, showInUserView: { $ne: false } }).populate('category').populate('brand', 'name slug');
   return ids
     .map((id) => products.find((p) => p._id.equals(id)))
     .filter(Boolean)
@@ -52,7 +52,7 @@ export const findPopular = async (limit = 8) => {
 };
 
 export const findNewArrivals = (limit = 8) =>
-  Product.find({ isNewArrival: true, isActive: true })
+  Product.find({ isNewArrival: true, isActive: true, showInUserView: { $ne: false } })
     .sort({ createdAt: -1 })
     .limit(limit)
     .populate('category')
