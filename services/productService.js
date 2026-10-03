@@ -13,7 +13,7 @@ const SLUG_RE      = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_IMAGES   = 10;
 
 const BOOL_FIELDS = Object.freeze([
-  'isActive', 'isFeatured', 'isFlashSale', 'isPreOwned', 'isNewArrival',
+  'isActive', 'showInUserView', 'isFeatured', 'isFlashSale', 'isPreOwned', 'isNewArrival',
 ]);
 
 const NUM_FIELDS = Object.freeze([
@@ -106,12 +106,12 @@ export const getProducts = async (queryStr) => {
   }
 
   const features = new ApiFeatures(
-    Product.find({ isActive: true }).populate('category', 'name slug').populate('brand', 'name slug'),
+    Product.find({ isActive: true, showInUserView: { $ne: false } }).populate('category', 'name slug').populate('brand', 'name slug'),
     processedQuery,
   ).search().filter().sort();
 
   const countFeatures = new ApiFeatures(
-    Product.find({ isActive: true }),
+    Product.find({ isActive: true, showInUserView: { $ne: false } }),
     processedQuery,
   ).search().filter();
 
@@ -127,7 +127,7 @@ export const getProductById = async (id) => {
   if (!OBJECT_ID_RE.test(id)) throw new ErrorResponse('Invalid product ID', 400);
 
   const product = await productRepo.findById(id);
-  if (!product) throw new ErrorResponse('Product not found', 404);
+  if (!product || !product.isActive || product.showInUserView === false) throw new ErrorResponse('Product not found', 404);
 
   const reviews = await Review.find({ product: id, status: 'approved' })
     .populate('user', 'name avatar')
