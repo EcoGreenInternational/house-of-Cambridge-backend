@@ -15,7 +15,13 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
   if (!product || !product.isActive) throw new ErrorResponse('Product not found', 404);
 
   let variantData = null;
-  let itemPrice = product.discountPrice > 0 ? product.discountPrice : product.price;
+  const flashSalePrice = Number(product.flashSalePrice);
+  const hasFlashSalePrice = product.isFlashSale === true && Number.isFinite(flashSalePrice) && flashSalePrice > 0;
+  let itemPrice = hasFlashSalePrice
+    ? flashSalePrice
+    : product.discountPrice > 0
+      ? product.discountPrice
+      : product.price;
   let maxStock = product.stock;
 
   if (selectedVariant && product.variants?.length) {
@@ -35,7 +41,7 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
     if (matchedVariant) {
       if (!matchedVariant.isActive) throw new ErrorResponse('Selected variant is unavailable', 400);
       maxStock = matchedVariant.stock;
-      if (matchedVariant.price > 0) itemPrice = matchedVariant.price;
+      if (!hasFlashSalePrice && matchedVariant.price > 0) itemPrice = matchedVariant.price;
       variantData = {
         sku: matchedVariant.sku || '',
         name: matchedVariant.name || selectedVariant.name || '',
@@ -51,7 +57,7 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
         price: selectedVariant.price || itemPrice,
         image: selectedVariant.image || '',
       };
-      if (selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
+      if (!hasFlashSalePrice && selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
     }
   } else if (selectedVariant) {
     variantData = {
@@ -61,7 +67,7 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
       price: selectedVariant.price || itemPrice,
       image: selectedVariant.image || '',
     };
-    if (selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
+    if (!hasFlashSalePrice && selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
   }
 
   if (maxStock < qty) throw new ErrorResponse('Insufficient stock', 400);
@@ -83,6 +89,10 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
     const existingItem = cart.items.find(isSameItem);
     if (existingItem) {
       existingItem.quantity = Math.min(existingItem.quantity + qty, maxStock);
+      existingItem.price = itemPrice;
+      if (existingItem.selectedVariant) {
+        existingItem.selectedVariant.price = itemPrice;
+      }
     } else {
       cart.items.push({
         product: productId,

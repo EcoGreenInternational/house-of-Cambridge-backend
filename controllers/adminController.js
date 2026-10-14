@@ -15,6 +15,7 @@ import sendEmail from '../utils/sendEmail.js';
 import * as productService from '../services/productService.js';
 import { awardLoyaltyPoints } from '../utils/loyaltyHelper.js';
 import LoyaltyTransaction from '../model/LoyaltyTransaction.js';
+import SiteSetting from '../model/SiteSetting.js';
 import { 
   ORDER_STATUSES, 
   PAYMENT_STATUSES, 
@@ -660,6 +661,47 @@ export const updateFlashSale = async (req, res, next) => {
     if (!product) return next(new ErrorResponse('Product not found', 404));
 
     return res.json({ success: true, product });
+  } catch (err) { return next(err); }
+};
+
+export const getFlashSaleSetting = async (_req, res, next) => {
+  try {
+    const setting = await SiteSetting.findOne({ key: 'flashSaleVisible' }).lean();
+    return res.json({
+      success: true,
+      flashSaleVisible: setting?.booleanValue !== false && setting?.booleanValue !== 'false',
+      flashSalePosterUrl: setting?.image?.url || '',
+    });
+  } catch (err) { return next(err); }
+};
+
+export const updateFlashSaleSetting = async (req, res, next) => {
+  try {
+    const existing = await SiteSetting.findOne({ key: 'flashSaleVisible' });
+    const flashSaleVisible = req.body.flashSaleVisible === true || req.body.flashSaleVisible === 'true';
+    const update = { booleanValue: flashSaleVisible };
+
+    if (req.file) {
+      const uploaded = await uploadBuffer(req.file.buffer, 'flash-sale-posters');
+      if (!uploaded?.public_id || !uploaded?.secure_url) {
+        return next(new ErrorResponse('Flash sale poster upload failed', 502));
+      }
+      update.image = { public_id: uploaded.public_id, url: uploaded.secure_url };
+    }
+
+    const setting = await SiteSetting.findOneAndUpdate(
+      { key: 'flashSaleVisible' },
+      { $set: update },
+      { upsert: true, returnDocument: 'after', runValidators: true, setDefaultsOnInsert: true },
+    ).lean();
+    if (req.file && existing?.image?.public_id && existing.image.public_id !== setting.image.public_id) {
+      await deleteResource(existing.image.public_id).catch(() => {});
+    }
+    return res.json({
+      success: true,
+      flashSaleVisible: setting.booleanValue === true,
+      flashSalePosterUrl: setting.image?.url || '',
+    });
   } catch (err) { return next(err); }
 };
 

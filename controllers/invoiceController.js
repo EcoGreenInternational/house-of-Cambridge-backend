@@ -8,11 +8,14 @@ export const createInvoice = async (req, res, next) => {
   try {
     session.startTransaction();
 
-    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, approvedByName = '', approvedByDate, approvedBySignature = '', issuedBy } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, paymentMethod = 'cash', note = '', assignedPeople, approvedByName = '', approvedByDate, approvedBySignature = '', issuedBy } = req.body;
 
     if (!['online', 'manual'].includes(invoiceType)) {
       return next(new ErrorResponse('Invalid invoice type selection', 400));
     }
+
+    const validPaymentMethods = ['online', 'credit', 'cash', 'COD'];
+    const finalPaymentMethod = validPaymentMethods.includes(paymentMethod) ? paymentMethod : 'cash';
 
     // 1. Automatically Generate the Next Invoice Number based on sequence prefix code
     const prefix = invoiceType === 'online' ? 'O' : 'M';
@@ -88,6 +91,8 @@ export const createInvoice = async (req, res, next) => {
       invoiceNo: finalInvoiceNo,
       invoiceType,
       dueDate,
+      paymentMethod: finalPaymentMethod,
+      note: (typeof note === 'string' ? note.trim() : ''),
       assignedPeople,
       approvedByName,
       approvedByDate: approvedByDate || null,
@@ -133,7 +138,7 @@ export const updateInvoice = async (req, res, next) => {
     session.startTransaction();
 
     const { id } = req.params;
-    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, assignedPeople, approvedByName, approvedByDate, approvedBySignature } = req.body;
+    const { invoiceType, items, discount = 0, deliveryFee = 0, taxPercent = 0, clientDetails, dueDate, paymentMethod, note, assignedPeople, approvedByName, approvedByDate, approvedBySignature } = req.body;
 
     // 1. Fetch the existing invoice
     const invoice = await Invoice.findOne({ _id: id, isDeleted: { $ne: true } }).session(session);
@@ -231,6 +236,11 @@ export const updateInvoice = async (req, res, next) => {
     if (approvedByName !== undefined) invoice.approvedByName = approvedByName;
     if (approvedByDate !== undefined) invoice.approvedByDate = approvedByDate || null;
     if (approvedBySignature !== undefined) invoice.approvedBySignature = approvedBySignature;
+    if (paymentMethod !== undefined) {
+      const validPaymentMethods = ['online', 'credit', 'cash', 'COD'];
+      invoice.paymentMethod = validPaymentMethods.includes(paymentMethod) ? paymentMethod : 'cash';
+    }
+    if (note !== undefined) invoice.note = typeof note === 'string' ? note.trim() : '';
     if (items) invoice.items = processItems;
     
     invoice.subtotal = derivedSubtotal;
