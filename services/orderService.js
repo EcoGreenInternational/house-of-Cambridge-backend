@@ -15,6 +15,7 @@ const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RATE) : 0.08;
 const LOYALTY_EARN_RATE = 50;
 const MAX_LOYALTY_REDEEM_RATIO = 0.25;
+const COD_MAX_PRODUCTS = 3;
 
 const ALLOWED_PAYMENT_METHODS = ['card', 'paypal', 'koko', 'cod'];
 const ALLOWED_SHIPPING_METHODS = ['courier', 'express', 'pickup'];
@@ -49,6 +50,13 @@ export const createOrder = async (userId, sessionId, orderData) => {
   const shippingMethod = ALLOWED_SHIPPING_METHODS.includes(orderData.shippingMethod) ? orderData.shippingMethod : 'courier';
 
   const shippingAddress = sanitiseAddress(orderData.shippingAddress);
+
+  if (paymentMethod === 'cod') {
+    const totalQuantity = cart.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    if (totalQuantity > COD_MAX_PRODUCTS) {
+      throw new ErrorResponse(`Cash on Delivery is limited to ${COD_MAX_PRODUCTS} products per order`, 400);
+    }
+  }
 
 
   const productIds = cart.items.map(i => String(i.product._id || i.product));

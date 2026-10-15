@@ -21,6 +21,18 @@ const logoUpload = multer({
   },
 });
 
+const flashSalePosterUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, WebP, and GIF images are allowed'), false);
+    }
+  },
+});
+
 
 const orderIdParam = param('id')
   .custom((val) => {
@@ -75,6 +87,15 @@ router.put(
 );
 
 router.get('/products', ...admin, ctrl.getAdminProducts);
+router.get('/flash-sale-setting', ...admin, ctrl.getFlashSaleSetting);
+router.patch(
+  '/flash-sale-setting',
+  ...admin,
+  flashSalePosterUpload.single('poster'),
+  body('flashSaleVisible').isBoolean(),
+  validate,
+  ctrl.updateFlashSaleSetting,
+);
 router.post('/products', ...admin, upload.any(), ctrl.createProduct);
 router.put('/products/:id', ...admin, upload.any(), mongoId('id'), validate, ctrl.updateProduct);
 router.patch(

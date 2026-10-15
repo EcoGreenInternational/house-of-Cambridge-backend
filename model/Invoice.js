@@ -6,6 +6,8 @@ const invoiceSchema = new mongoose.Schema(
     invoiceType: { type: String, enum: ['online', 'manual'], required: true },
     invoiceDate: { type: Date, required: true, default: Date.now },
     dueDate: { type: Date },
+    paymentMethod: { type: String, enum: ['online', 'credit', 'cash', 'COD'], default: 'cash' },
+    note: { type: String, default: '' },
     assignedPeople: { type: String, default: '' },
     approvedByName: { type: String, default: '' },
     approvedByDate: { type: Date, default: null },

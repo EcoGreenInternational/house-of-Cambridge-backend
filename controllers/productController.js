@@ -2,6 +2,7 @@ import * as productService from '../services/productService.js';
 import * as productRepo from '../repositories/productRepository.js';
 import Category from '../model/Category.js';
 import Product from '../model/Product.js';
+import SiteSetting from '../model/SiteSetting.js';
 import ErrorResponse from '../utils/errorResponse.js';
 
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
@@ -112,8 +113,15 @@ export const deleteProduct = async (req, res, next) => {
 export const getFlashSaleProducts = async (req, res, next) => {
   try {
     const limit    = sanitiseListLimit(req.query.limit);
+    const setting  = await SiteSetting.findOne({ key: 'flashSaleVisible' }).lean();
     const products = await productRepo.findFlashSale(limit);
-    return res.json({ success: true, count: products.length, products });
+    return res.json({
+      success: true,
+      flashSaleVisible: setting?.booleanValue !== false && setting?.booleanValue !== 'false',
+      flashSalePosterUrl: setting?.image?.url || '',
+      count: products.length,
+      products,
+    });
   } catch (err) {
     return next(err);
   }
