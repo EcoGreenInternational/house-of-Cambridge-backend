@@ -4,6 +4,12 @@ const invoiceSchema = new mongoose.Schema(
   {
     invoiceNo: { type: String, required: true, unique: true },
     invoiceType: { type: String, enum: ['online', 'manual'], required: true },
+    sourceOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order',
+      default: null,
+      index: true,
+    },
     invoiceDate: { type: Date, required: true, default: Date.now },
     dueDate: { type: Date },
     paymentMethod: { type: String, enum: ['online', 'credit', 'cash', 'COD'], default: 'cash' },

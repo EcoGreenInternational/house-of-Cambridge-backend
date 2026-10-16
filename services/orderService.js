@@ -10,6 +10,7 @@ import * as cartService from './cartService.js';
 import { calcShipping, calcTotalWeightKg } from '../utils/shippingUtils.js';
 import { ORDER_STATUSES, PAYMENT_STATUSES } from '../constants/order.js';
 import Order from '../model/Order.js';
+import Invoice from '../model/Invoice.js';
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
 const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RATE) : 0.08;
@@ -127,6 +128,48 @@ export const createOrder = async (userId, sessionId, orderData) => {
     loyaltyPointsAwarded: false,
     notes: (orderData.notes || orderData.orderNotes || '').trim().slice(0, 500),
   });
+
+  const lastOnlineInvoice = await Invoice.findOne({ invoiceType: 'online' })
+    .sort({ createdAt: -1 })
+    .select('invoiceNo')
+    .lean();
+  const lastInvoiceNumber = Number.parseInt(
+    String(lastOnlineInvoice?.invoiceNo || '').replace(/^O/, ''),
+    10,
+  );
+  const invoiceNo = `O${Number.isFinite(lastInvoiceNumber) ? lastInvoiceNumber + 1 : 1001}`;
+
+  await Invoice.create({
+    invoiceNo,
+    invoiceType: 'online',
+    sourceOrder: order._id,
+    dueDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+    paymentMethod: paymentMethod === 'cod' ? 'COD' : 'online',
+    clientDetails: {
+      clientName: shippingAddress.fullName,
+      address: [shippingAddress.addressLine1, shippingAddress.addressLine2, shippingAddress.city, shippingAddress.state, shippingAddress.country]
+        .filter(Boolean)
+        .join(', '),
+      email: order.guestEmail || '',
+      phone: shippingAddress.phone || '',
+    },
+    items: order.items.map((item) => ({
+      product: item.product,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      total: item.price * item.quantity,
+    })),
+    subtotal,
+    discount,
+    deliveryFee: shippingCost,
+    taxPercent: subtotal - discount > 0 ? (tax / (subtotal - discount)) * 100 : 0,
+    taxAmount: tax,
+    totalAmountDue: total,
+  });
+
+  await Order.findByIdAndUpdate(order._id, { invoiceNo });
+  order.invoiceNo = invoiceNo;
 
   await Promise.allSettled(cart.items.map(async (item) => {
     const prodId = item.product._id || item.product;

@@ -1,7 +1,62 @@
 import mongoose from 'mongoose';
 import Invoice from '../model/Invoice.js';
 import Product from '../model/Product.js';
+import Order from '../model/Order.js';
 import ErrorResponse from '../utils/errorResponse.js';
+
+const nextOnlineInvoiceNo = async () => {
+  const lastInvoice = await Invoice.findOne({ invoiceType: 'online' })
+    .sort({ createdAt: -1 })
+    .select('invoiceNo')
+    .lean();
+  const currentNumber = Number.parseInt(String(lastInvoice?.invoiceNo || '').replace(/^O/, ''), 10);
+  return `O${Number.isFinite(currentNumber) ? currentNumber + 1 : 1001}`;
+};
+
+const createInvoiceFromOrder = async (order) => {
+  const existing = await Invoice.findOne({
+    $or: [{ sourceOrder: order._id }, { invoiceNo: order.invoiceNo || '__missing__' }],
+  });
+  if (existing) return existing;
+
+  const invoice = await Invoice.create({
+    invoiceNo: await nextOnlineInvoiceNo(),
+    invoiceType: 'online',
+    sourceOrder: order._id,
+    invoiceDate: order.createdAt,
+    dueDate: new Date(new Date(order.createdAt).getTime() + 10 * 24 * 60 * 60 * 1000),
+    paymentMethod: order.paymentMethod === 'cod' ? 'COD' : 'online',
+    clientDetails: {
+      clientName: order.shippingAddress?.fullName || order.guestName || 'Online Customer',
+      address: [
+        order.shippingAddress?.addressLine1,
+        order.shippingAddress?.addressLine2,
+        order.shippingAddress?.city,
+        order.shippingAddress?.state,
+        order.shippingAddress?.country,
+      ].filter(Boolean).join(', '),
+      email: order.guestEmail || '',
+      phone: order.shippingAddress?.phone || '',
+    },
+    items: order.items.map((item) => ({
+      product: item.product,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      total: item.price * item.quantity,
+    })),
+    subtotal: order.subtotal,
+    discount: order.discount,
+    deliveryFee: order.shippingCost,
+    taxAmount: order.tax,
+    totalAmountDue: order.total,
+  });
+
+  if (order.invoiceNo !== invoice.invoiceNo) {
+    await Order.updateOne({ _id: order._id }, { $set: { invoiceNo: invoice.invoiceNo } });
+  }
+  return invoice;
+};
 
 export const createInvoice = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -123,10 +178,28 @@ export const createInvoice = async (req, res, next) => {
 // Get all invoices list 
 export const getInvoices = async (req, res, next) => {
   try {
-    const invoices = await Invoice.find({ isDeleted: { $ne: true } })
+    const onlineOrders = await Order.find({}).sort({ createdAt: 1 });
+
+    for (const order of onlineOrders) {
+      await createInvoiceFromOrder(order);
+    }
+
+    const query = { isDeleted: { $ne: true } };
+    if (['online', 'manual'].includes(req.query.status)) {
+      query.invoiceType = req.query.status;
+    }
+    if (typeof req.query.search === 'string' && req.query.search.trim()) {
+      const search = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.$or = [
+        { invoiceNo: { $regex: search, $options: 'i' } },
+        { 'clientDetails.clientName': { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const invoices = await Invoice.find(query)
       .populate('items.product', 'name price stock productCode')
       .sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, count: invoices.length, invoices });
+    return res.status(200).json({ success: true, count: invoices.length, total: invoices.length, invoices });
   } catch (err) {
     return next(err);
   }
