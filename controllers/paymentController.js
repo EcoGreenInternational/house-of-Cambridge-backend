@@ -1,15 +1,27 @@
 import Order from '../model/Order.js';
 import Notification from '../model/Notification.js';
 import ErrorResponse from '../utils/errorResponse.js';
-import { verifyPayHereNotification, generatePayHereHash } from '../utils/payhereUtils.js';
+import {
+  verifyPayHereNotification,
+  buildPayHereCheckout,
+  formatPayHereAmount,
+} from '../utils/payhereUtils.js';
 import { createPayPalOrder, capturePayPalOrder } from '../utils/paypalUtils.js';
 import axios from 'axios';
+import { logger } from '../utils/logger.js';
 
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
 const ALLOWED_CURRENCIES = Object.freeze(['LKR', 'USD', 'EUR', 'GBP']);
 
-const PAYHERE_STATUS = Object.freeze({ SUCCESS: '2', FAILED: '-1', CANCELLED: '-2' });
+// https://support.payhere.lk/api-&-mobile-sdk/checkout-api
+const PAYHERE_STATUS = Object.freeze({
+  SUCCESS:     '2',
+  PENDING:     '0',
+  CANCELLED:   '-1',
+  FAILED:      '-2',
+  CHARGEDBACK: '-3',
+});
 
 const sanitiseOrderId = (id, next) => {
   if (!id || !OBJECT_ID_RE.test(id)) {
@@ -30,33 +42,40 @@ const createPaymentNotification = async (order, message) => {
   });
 };
 
-export const getPayHereHash = async (req, res, next) => {
+export const createPayHereCheckout = async (req, res, next) => {
   try {
-    const { orderId, amount, currency = 'LKR' } = req.body;
-
+    const { orderId } = req.body;
     if (!sanitiseOrderId(orderId, next)) return;
 
-    if (!ALLOWED_CURRENCIES.includes(currency)) {
-      return next(new ErrorResponse('Unsupported currency', 400));
-    }
-
-    const parsedAmount = parseFloat(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      return next(new ErrorResponse('Invalid amount', 400));
-    }
-
-    const order = await Order.findById(orderId).select('orderNumber').lean();
+    const order = await Order.findById(orderId)
+      .select('user guestEmail guestName orderNumber items shippingAddress total paymentMethod paymentStatus orderStatus')
+      .populate('user', 'name email phone')
+      .lean();
     if (!order) return next(new ErrorResponse('Order not found', 404));
 
-    const hash = generatePayHereHash(
-      process.env.PAYHERE_MERCHANT_ID,
-      order.orderNumber,
-      parsedAmount,
-      currency,
-      process.env.PAYHERE_MERCHANT_SECRET,
-    );
+    if (order.user) {
+      const isOwner = req.user && String(order.user._id) === String(req.user._id);
+      if (!isOwner) return next(new ErrorResponse('Access denied', 403));
+    }
 
-    return res.json({ success: true, hash, merchantId: process.env.PAYHERE_MERCHANT_ID });
+    if (order.paymentMethod !== 'card') {
+      return next(new ErrorResponse('This order is not a card payment order', 400));
+    }
+    if (order.paymentStatus === 'paid') {
+      return next(new ErrorResponse('This order has already been paid', 400));
+    }
+    if (order.orderStatus === 'cancelled') {
+      return next(new ErrorResponse('This order has been cancelled', 400));
+    }
+    if (!Number.isFinite(order.total) || order.total <= 0) {
+      return next(new ErrorResponse('Order total is invalid', 422));
+    }
+    if (!process.env.PAYHERE_NOTIFY_URL) {
+      return next(new ErrorResponse('PayHere notify URL is not configured', 500));
+    }
+
+    const checkout = buildPayHereCheckout(order);
+    return res.json({ success: true, ...checkout });
   } catch (err) {
     return next(err);
   }
@@ -66,37 +85,64 @@ export const payHereNotify = async (req, res) => {
   try {
     const data = req.body;
 
-    const valid = verifyPayHereNotification(data, process.env.PAYHERE_MERCHANT_SECRET);
+    const valid = verifyPayHereNotification(data);
     if (!valid) return res.status(400).send('Invalid signature');
+
+    if (String(data.merchant_id) !== String(process.env.PAYHERE_MERCHANT_ID)) {
+      return res.status(400).send('Merchant mismatch');
+    }
 
     if (!data.order_id || typeof data.order_id !== 'string') {
       return res.status(400).send('Missing order_id');
     }
 
     const order = await Order.findOne({ orderNumber: data.order_id }).select(
-      'user orderNumber paymentStatus orderStatus paymentId',
+      'user orderNumber total paymentMethod paymentStatus orderStatus paymentId adminNotes',
     );
     if (!order) return res.status(404).send('Order not found');
 
-    if (data.status_code === PAYHERE_STATUS.SUCCESS) {
-      order.paymentStatus = 'paid';
-      order.orderStatus   = 'confirmed';
-      order.paymentId     = data.payment_id;
-      await order.save();
-      await createPaymentNotification(
-        order,
-        `Payment for order #${order.orderNumber} was successful.`,
-      );
-    } else if (
-      data.status_code === PAYHERE_STATUS.FAILED ||
-      data.status_code === PAYHERE_STATUS.CANCELLED
-    ) {
-      order.paymentStatus = 'failed';
+    // The signature only proves PayHere sent it; also make sure the amount is the one we charged
+    const amountMatches =
+      data.payhere_currency === 'LKR' &&
+      formatPayHereAmount(data.payhere_amount) === formatPayHereAmount(order.total);
+    if (!amountMatches) {
+      logger.warn('PayHere amount mismatch', {
+        orderNumber: order.orderNumber,
+        amount:      data.payhere_amount,
+        currency:    data.payhere_currency,
+      });
+      return res.status(400).send('Amount mismatch');
+    }
+
+    const status = String(data.status_code);
+
+    if (status === PAYHERE_STATUS.SUCCESS) {
+      if (order.paymentStatus !== 'paid') {
+        order.paymentStatus = 'paid';
+        if (order.orderStatus === 'pending') order.orderStatus = 'confirmed';
+        order.paymentId = String(data.payment_id || '');
+        await order.save();
+        await createPaymentNotification(
+          order,
+          `Payment for order #${order.orderNumber} was successful.`,
+        );
+      }
+    } else if (status === PAYHERE_STATUS.CANCELLED || status === PAYHERE_STATUS.FAILED) {
+      // Never downgrade an order that has already been paid
+      if (order.paymentStatus === 'pending') {
+        order.paymentStatus = 'failed';
+        await order.save();
+      }
+    } else if (status === PAYHERE_STATUS.CHARGEDBACK) {
+      order.paymentStatus = 'refunded';
+      order.adminNotes = `${order.adminNotes ? `${order.adminNotes}\n` : ''}PayHere chargeback on payment ${data.payment_id || ''}`.slice(0, 1000);
       await order.save();
     }
+    // PENDING: leave the order as it is and wait for the next notification
 
     return res.send('OK');
   } catch (err) {
+    logger.error('PayHere notify failed', { error: err.message });
     return res.status(500).send('Error');
   }
 };

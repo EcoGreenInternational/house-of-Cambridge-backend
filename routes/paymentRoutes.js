@@ -7,13 +7,11 @@ import { validate } from '../middleware/validate.js';
 const router = Router();
 
 router.post(
-  '/payhere/hash',
-  protect,
+  '/payhere/checkout',
+  optionalAuth,
   body('orderId').isMongoId(),
-  body('amount').isFloat({ min: 0 }),
-  body('currency').optional().isIn(['LKR', 'USD']),
   validate,
-  ctrl.getPayHereHash,
+  ctrl.createPayHereCheckout,
 );
 
 router.post('/payhere/notify', ctrl.payHereNotify);
