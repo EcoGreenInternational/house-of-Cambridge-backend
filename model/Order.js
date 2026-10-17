@@ -40,6 +40,11 @@ const orderSchema = new mongoose.Schema(
       unique: true,
       index:  true,
     },
+    invoiceNo: {
+      type: String,
+      default: '',
+      index: true,
+    },
 
     items: [orderItemSchema],
 
