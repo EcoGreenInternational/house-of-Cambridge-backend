@@ -58,6 +58,26 @@ export const generatePayHereHash = (merchantId, orderId, amount, currency) => {
   return crypto.createHash('md5').update(raw).digest('hex').toUpperCase();
 };
 
+// Customers are sent back to CLIENT_URL after paying, so a localhost value on a real server strands them
+export const checkPayHereConfig = (log) => {
+  const clientUrl = process.env.CLIENT_URL || '';
+  const notifyUrl = process.env.PAYHERE_NOTIFY_URL || '';
+  const isLocal   = (url) => /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(url);
+
+  if (!clientUrl) {
+    log.warn('CLIENT_URL is not set; PayHere cannot send customers back to the site');
+  } else if (isLocal(clientUrl) && notifyUrl && !isLocal(notifyUrl)) {
+    log.warn('CLIENT_URL points to localhost but PAYHERE_NOTIFY_URL is public; customers will be returned to localhost after paying', {
+      clientUrl, notifyUrl,
+    });
+  }
+  log.info('PayHere config', {
+    mode:      process.env.PAYHERE_MODE === 'live' ? 'live' : 'sandbox',
+    returnTo:  `${clientUrl.replace(/\/+$/, '')}/order-confirmation/<orderId>`,
+    notifyUrl,
+  });
+};
+
 export const buildPayHereCheckout = (order) => {
   assertEnv();
 
