@@ -705,6 +705,24 @@ export const updateFlashSaleSetting = async (req, res, next) => {
   } catch (err) { return next(err); }
 };
 
+export const deleteFlashSalePoster = async (_req, res, next) => {
+  try {
+    const setting = await SiteSetting.findOne({ key: 'flashSaleVisible' });
+    if (setting?.image?.public_id) {
+      await deleteResource(setting.image.public_id);
+    }
+    if (setting) {
+      setting.image = undefined;
+      await setting.save();
+    }
+    return res.json({
+      success: true,
+      flashSaleVisible: setting?.booleanValue !== false && setting?.booleanValue !== 'false',
+      flashSalePosterUrl: '',
+    });
+  } catch (err) { return next(err); }
+};
+
 export const deleteProduct = async (req, res, next) => {
   try {
     validateObjectId(req.params.id, 'product ID');
