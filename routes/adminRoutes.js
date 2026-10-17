@@ -96,6 +96,7 @@ router.patch(
   validate,
   ctrl.updateFlashSaleSetting,
 );
+router.delete('/flash-sale-setting/poster', ...admin, ctrl.deleteFlashSalePoster);
 router.post('/products', ...admin, upload.any(), ctrl.createProduct);
 router.put('/products/:id', ...admin, upload.any(), mongoId('id'), validate, ctrl.updateProduct);
 router.patch(
