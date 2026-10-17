@@ -1,10 +1,47 @@
+import Cart from '../model/Cart.js';
 import * as cartRepo from '../repositories/cartRepository.js';
 import Product from '../model/Product.js';
 import Coupon from '../model/Coupon.js';
 import ErrorResponse from '../utils/errorResponse.js';
 
-export const getCart = (userId, sessionId) => {
-  if (userId) return cartRepo.findByUser(userId);
+const MAX_ITEM_QTY = 100;
+
+const itemKey = (item) => `${String(item.product?._id || item.product)}::${item.selectedVariant?.name || ''}`;
+
+// Moves a guest's cart into their account the first time they're seen signed in
+const mergeGuestCart = async (userId, sessionId) => {
+  const guestCart = await Cart.findOne({ sessionId, user: null });
+  if (!guestCart) return;
+
+  if (guestCart.items.length) {
+    const userCart = await Cart.findOne({ user: userId });
+    if (!userCart) {
+      guestCart.user = userId;
+      guestCart.sessionId = null;
+      await guestCart.save();
+      return;
+    }
+
+    const byKey = new Map(userCart.items.map((item) => [itemKey(item), item]));
+    for (const item of guestCart.items) {
+      const existing = byKey.get(itemKey(item));
+      if (existing) {
+        existing.quantity = Math.min(MAX_ITEM_QTY, Math.max(existing.quantity, item.quantity));
+      } else {
+        userCart.items.push(item.toObject());
+      }
+    }
+    await userCart.save();
+  }
+
+  await Cart.deleteOne({ _id: guestCart._id });
+};
+
+export const getCart = async (userId, sessionId) => {
+  if (userId) {
+    if (sessionId) await mergeGuestCart(userId, sessionId);
+    return cartRepo.findByUser(userId);
+  }
   if (sessionId) return cartRepo.findBySession(sessionId);
   return null;
 };

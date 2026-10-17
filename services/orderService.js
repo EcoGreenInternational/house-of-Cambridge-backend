@@ -18,6 +18,7 @@ const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RAT
 const LOYALTY_EARN_RATE = 50;
 const MAX_LOYALTY_REDEEM_RATIO = 0.25;
 const COD_MAX_PRODUCTS = 3;
+const GUEST_HAS_ACCOUNT_MESSAGE = 'An account already exists for this email. Please sign in to place your order.';
 
 const ALLOWED_PAYMENT_METHODS = ['card', 'paypal', 'koko', 'cod'];
 const ALLOWED_SHIPPING_METHODS = ['courier', 'express', 'pickup'];
@@ -52,6 +53,12 @@ export const createOrder = async (userId, sessionId, orderData) => {
   if (!userId) {
     const guestErrors = validateGuestContact(orderData);
     if (guestErrors.length) throw new ErrorResponse(guestErrors.join(', '), 400);
+
+    // Customers with an account must sign in so the order lands in their history
+    const hasAccount = await User.exists({ email: orderData.guestEmail.trim().toLowerCase() });
+    if (hasAccount) {
+      throw new ErrorResponse(GUEST_HAS_ACCOUNT_MESSAGE, 409);
+    }
   }
 
   if (paymentMethod === 'cod') {
