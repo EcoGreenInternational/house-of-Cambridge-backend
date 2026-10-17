@@ -11,6 +11,7 @@ import { calcShipping, calcTotalWeightKg } from '../utils/shippingUtils.js';
 import { ORDER_STATUSES, PAYMENT_STATUSES } from '../constants/order.js';
 import Order from '../model/Order.js';
 import Invoice from '../model/Invoice.js';
+import { validateShippingAddress, validateGuestContact } from '../utils/checkoutValidation.js';
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
 const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RATE) : 0.08;
@@ -24,22 +25,18 @@ const ALLOWED_SHIPPING_METHODS = ['courier', 'express', 'pickup'];
 const escapeHtml = (str) => String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const sanitiseAddress = (addr) => {
-  if (!addr || typeof addr !== 'object') throw new ErrorResponse('Shipping address is required', 400);
-
-  const required = ['fullName', 'addressLine1', 'city', 'postalCode', 'country'];
-  for (const field of required) {
-    if (!addr[field]?.trim()) throw new ErrorResponse(`Missing field: ${field}`, 400);
-  }
+  const errors = validateShippingAddress(addr);
+  if (errors.length) throw new ErrorResponse(errors.join(', '), 400);
 
   return {
     fullName: addr.fullName.trim().slice(0, 100),
     addressLine1: addr.addressLine1.trim().slice(0, 200),
-    addressLine2: (addr.addressLine2 || '').trim().slice(0, 200),
+    addressLine2: typeof addr.addressLine2 === 'string' ? addr.addressLine2.trim().slice(0, 200) : '',
     city: addr.city.trim().slice(0, 100),
-    state: (addr.state || '').trim().slice(0, 100),
+    state: typeof addr.state === 'string' ? addr.state.trim().slice(0, 100) : '',
     postalCode: addr.postalCode.trim().slice(0, 20),
-    country: addr.country.trim().slice(0, 100),
-    phone: (addr.phone || '').trim().slice(0, 20),
+    country: (typeof addr.country === 'string' && addr.country.trim()) ? addr.country.trim().slice(0, 100) : 'Sri Lanka',
+    phone: addr.phone.trim(),
   };
 };
 
@@ -51,6 +48,11 @@ export const createOrder = async (userId, sessionId, orderData) => {
   const shippingMethod = ALLOWED_SHIPPING_METHODS.includes(orderData.shippingMethod) ? orderData.shippingMethod : 'courier';
 
   const shippingAddress = sanitiseAddress(orderData.shippingAddress);
+
+  if (!userId) {
+    const guestErrors = validateGuestContact(orderData);
+    if (guestErrors.length) throw new ErrorResponse(guestErrors.join(', '), 400);
+  }
 
   if (paymentMethod === 'cod') {
     const totalQuantity = cart.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -104,8 +106,8 @@ export const createOrder = async (userId, sessionId, orderData) => {
 
   const order = await orderRepo.create({
     user: userId || null,
-    guestEmail: orderData.guestEmail?.trim() || '',
-    guestName: orderData.guestName?.trim() || '',
+    guestEmail: userId ? '' : orderData.guestEmail.trim().toLowerCase(),
+    guestName: userId ? '' : (typeof orderData.guestName === 'string' ? orderData.guestName.trim().slice(0, 100) : ''),
     items: cart.items.map(i => ({
       product: i.product._id || i.product,
       name: i.product.name || '',
