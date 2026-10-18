@@ -14,7 +14,7 @@ import Invoice from '../model/Invoice.js';
 import { validateShippingAddress, validateGuestContact } from '../utils/checkoutValidation.js';
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
-const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RATE) : 0.08;
+const TAX_RATE = 0;
 const LOYALTY_EARN_RATE = 50;
 const MAX_LOYALTY_REDEEM_RATIO = 0.25;
 const COD_MAX_PRODUCTS = 3;
