@@ -3,6 +3,7 @@ import * as userRepo from '../repositories/userRepository.js';
 import sendToken from '../utils/sendToken.js';
 import ErrorResponse from '../utils/errorResponse.js';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import User from '../model/User.js';
 
 const EMAIL_RE         = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -86,8 +87,9 @@ export const refreshToken = async (req, res, next) => {
       return next(new ErrorResponse('Invalid or expired refresh token', 401));
     }
 
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     const user = await User.findById(decoded.id).select('+refreshToken');
-    if (!user || user.refreshToken !== token) {
+    if (!user || (user.refreshToken !== hashedToken && user.refreshToken !== token)) {
       return next(new ErrorResponse('Refresh token revoked', 401));
     }
 

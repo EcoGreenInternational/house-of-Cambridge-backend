@@ -234,7 +234,12 @@ export const updateUser = async (req, res, next) => {
     if (isActive      !== undefined) update.isActive      = isActive === true || isActive === 'true';
     if (loyaltyPoints !== undefined) update.loyaltyPoints = Number(loyaltyPoints);
 
-    if (!Object.keys(update).length) return next(new ErrorResponse('No valid fields provided', 400));
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) return next(new ErrorResponse('User not found', 404));
+
+    if (ADMIN_ROLES.includes(targetUser.role) && req.user.role !== 'superadmin') {
+      return next(new ErrorResponse('Only super admin can modify administrative accounts', 403));
+    }
 
     const user = await User.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' })
       .select('-password -__v');

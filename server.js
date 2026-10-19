@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import connectDB from './config/db.js';
 import errorHandler from './middleware/errorHandler.js';
 import { requestLogger } from './utils/logger.js';
-import { apiLimiter } from './utils/rateLimiter.js';
+import { apiLimiter, authLimiter, contactLimiter } from './utils/rateLimiter.js';
 import './config/firebaseAdmin.js';
 import authRoutes    from './routes/authRoutes.js';
 import productRoutes from './routes/productRoutes.js';
@@ -19,6 +19,7 @@ import paymentRoutes from './routes/paymentRoutes.js';
 import brandRoutes   from './routes/brandRoutes.js';
 import invoiceRoutes  from './routes/invoiceRoutes.js';
 import loyaltyRoutes from './routes/loyaltyRoutes.js';
+import contactRoutes from './routes/contactRoutes.js';
 
 connectDB();
 
@@ -85,7 +86,7 @@ app.use(mongoSanitize);
 app.use(requestLogger);
 app.use('/api', apiLimiter);
 
-app.use('/api/auth',     authRoutes);
+app.use('/api/auth',     authLimiter, authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart',     cartRoutes);
 app.use('/api/orders',   orderRoutes);
@@ -95,7 +96,8 @@ app.use('/api/upload',   uploadRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/brands',   brandRoutes);
 app.use('/api/admin/invoices', invoiceRoutes);
-app.use('/api/loyalty',  loyaltyRoutes);  
+app.use('/api/loyalty',  loyaltyRoutes);
+app.use('/api/contact',  contactLimiter, contactRoutes);
 
 app.use(errorHandler);
 
