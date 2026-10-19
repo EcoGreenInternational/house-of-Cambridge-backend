@@ -75,36 +75,24 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
       return false;
     });
 
-    if (matchedVariant) {
-      if (!matchedVariant.isActive) throw new ErrorResponse('Selected variant is unavailable', 400);
-      maxStock = matchedVariant.stock;
-      if (!hasFlashSalePrice && matchedVariant.price > 0) itemPrice = matchedVariant.price;
-      variantData = {
-        sku: matchedVariant.sku || '',
-        name: matchedVariant.name || selectedVariant.name || '',
-        attributes: matchedVariant.attributes || selectedVariant.attributes || {},
-        price: itemPrice,
-        image: matchedVariant.image?.url || '',
-      };
-    } else if (selectedVariant) {
-      variantData = {
-        sku: selectedVariant.sku || '',
-        name: selectedVariant.name || '',
-        attributes: selectedVariant.attributes || {},
-        price: selectedVariant.price || itemPrice,
-        image: selectedVariant.image || '',
-      };
-      if (!hasFlashSalePrice && selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
+    if (!matchedVariant) {
+      throw new ErrorResponse('Selected variant does not exist', 400);
     }
-  } else if (selectedVariant) {
+    if (!matchedVariant.isActive) {
+      throw new ErrorResponse('Selected variant is unavailable', 400);
+    }
+
+    maxStock = matchedVariant.stock;
+    if (!hasFlashSalePrice && matchedVariant.price > 0) itemPrice = matchedVariant.price;
     variantData = {
-      sku: selectedVariant.sku || '',
-      name: selectedVariant.name || '',
-      attributes: selectedVariant.attributes || {},
-      price: selectedVariant.price || itemPrice,
-      image: selectedVariant.image || '',
+      sku: matchedVariant.sku || '',
+      name: matchedVariant.name || '',
+      attributes: matchedVariant.attributes || {},
+      price: itemPrice,
+      image: matchedVariant.image?.url || '',
     };
-    if (!hasFlashSalePrice && selectedVariant.price > 0) itemPrice = Number(selectedVariant.price);
+  } else {
+    variantData = null;
   }
 
   if (maxStock < qty) throw new ErrorResponse('Insufficient stock', 400);
@@ -138,6 +126,7 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
         selectedVariant: variantData || undefined,
       });
     }
+    await recalculateCartDiscount(cart);
     await cart.save();
     return cart.populate('items.product');
   }
@@ -158,6 +147,32 @@ export const addToCart = async (userId, sessionId, productId, quantity, selected
   }
   data.sessionId = sessionId;
   return cartRepo.upsertForSession(sessionId, data);
+};
+
+export const recalculateCartDiscount = async (cart) => {
+  if (!cart || !cart.coupon) {
+    if (cart) cart.discount = 0;
+    return;
+  }
+  const coupon = await Coupon.findById(cart.coupon);
+  if (!coupon || !coupon.isActive || (coupon.expiryDate && new Date(coupon.expiryDate) < new Date())) {
+    cart.coupon = null;
+    cart.discount = 0;
+    return;
+  }
+  const subtotal = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  if (coupon.minOrderAmount > 0 && subtotal < coupon.minOrderAmount) {
+    cart.coupon = null;
+    cart.discount = 0;
+    return;
+  }
+  let discount =
+    coupon.discountType === 'percentage'
+      ? (subtotal * coupon.discountValue) / 100
+      : coupon.discountValue;
+
+  if (coupon.maxDiscount > 0) discount = Math.min(discount, coupon.maxDiscount);
+  cart.discount = Math.min(Math.round(discount), subtotal);
 };
 
 export const updateCartItem = async (userId, sessionId, productId, quantity, itemId = null, variantName = null) => {
@@ -182,6 +197,7 @@ export const updateCartItem = async (userId, sessionId, productId, quantity, ite
     item.quantity = qty;
   }
 
+  await recalculateCartDiscount(cart);
   await cart.save();
   return cart.populate('items.product');
 };
@@ -200,6 +216,8 @@ export const removeFromCart = async (userId, sessionId, productId, itemId = null
     }
     return true;
   });
+
+  await recalculateCartDiscount(cart);
   await cart.save();
   return cart.populate('items.product');
 };

@@ -152,8 +152,12 @@ export const createPayPalPayment = async (req, res, next) => {
     const { orderId } = req.body;
     if (!sanitiseOrderId(orderId, next)) return;
 
-    const order = await Order.findById(orderId).select('total').lean();
+    const order = await Order.findById(orderId).select('total user').lean();
     if (!order) return next(new ErrorResponse('Order not found', 404));
+
+    if (order.user && String(order.user) !== String(req.user._id)) {
+      return next(new ErrorResponse('Access denied', 403));
+    }
 
     if (!Number.isFinite(order.total) || order.total <= 0) {
       return next(new ErrorResponse('Order total is invalid', 422));
@@ -178,15 +182,19 @@ export const capturePayPalPayment = async (req, res, next) => {
       return next(new ErrorResponse('Invalid PayPal order ID', 400));
     }
 
-    const capture = await capturePayPalOrder(paypalOrderId);
-    if (capture.status !== 'COMPLETED') {
-      return next(new ErrorResponse('PayPal capture failed', 400));
-    }
-
     const order = await Order.findById(orderId).select(
       'user orderNumber paymentStatus orderStatus paymentId',
     );
     if (!order) return next(new ErrorResponse('Order not found', 404));
+
+    if (order.user && String(order.user) !== String(req.user._id)) {
+      return next(new ErrorResponse('Access denied', 403));
+    }
+
+    const capture = await capturePayPalOrder(paypalOrderId);
+    if (capture.status !== 'COMPLETED') {
+      return next(new ErrorResponse('PayPal capture failed', 400));
+    }
 
     order.paymentStatus = 'paid';
     order.orderStatus   = 'confirmed';
@@ -209,8 +217,12 @@ export const initiateKoko = async (req, res, next) => {
     const { orderId } = req.body;
     if (!sanitiseOrderId(orderId, next)) return;
 
-    const order = await Order.findById(orderId).select('orderNumber total _id').lean();
+    const order = await Order.findById(orderId).select('orderNumber total _id user').lean();
     if (!order) return next(new ErrorResponse('Order not found', 404));
+
+    if (order.user && String(order.user) !== String(req.user._id)) {
+      return next(new ErrorResponse('Access denied', 403));
+    }
 
     const kokoRes = await axios.post(
       'https://api.koko.lk/v1/orders',
@@ -244,15 +256,42 @@ export const kokoNotify = async (req, res) => {
       return res.status(400).send('Missing order_id');
     }
 
+    // Verify webhook signature or auth token if configured
+    const signature = req.headers['x-koko-signature'] || req.headers['authorization'];
+    if (process.env.KOKO_WEBHOOK_SECRET && signature !== process.env.KOKO_WEBHOOK_SECRET) {
+      logger.warn('Koko unauthorized webhook attempt', { order_id });
+      return res.status(401).send('Unauthorized webhook signature');
+    }
+
     const order = await Order.findOne({ orderNumber: order_id }).select(
-      'paymentStatus orderStatus',
+      'paymentStatus orderStatus user orderNumber',
     );
     if (!order) return res.status(404).send('Not found');
 
     if (status === 'SUCCESS') {
+      if (process.env.KOKO_API_KEY) {
+        try {
+          const verifyRes = await axios.get(
+            `https://api.koko.lk/v1/orders/${encodeURIComponent(order_id)}`,
+            { headers: { Authorization: `Bearer ${process.env.KOKO_API_KEY}` }, timeout: 5000 }
+          );
+          if (verifyRes.data?.status !== 'SUCCESS') {
+            logger.warn('Koko payment status verification mismatch', { order_id, returnedStatus: verifyRes.data?.status });
+            return res.status(400).send('Payment not verified with Koko gateway');
+          }
+        } catch (verifyErr) {
+          logger.warn('Could not verify status with Koko endpoint', { error: verifyErr.message });
+        }
+      }
+
       order.paymentStatus = 'paid';
       order.orderStatus   = 'confirmed';
       await order.save();
+
+      await createPaymentNotification(
+        order,
+        `Payment for order #${order.orderNumber} via Koko was successful.`,
+      );
     }
 
     return res.send('OK');

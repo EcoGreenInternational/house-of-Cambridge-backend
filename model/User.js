@@ -67,7 +67,7 @@ userSchema.methods.getRefreshToken = function () {
   const refreshToken = jwt.sign({ id: this._id }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d',
   });
-  this.refreshToken = refreshToken; 
+  this.refreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex'); 
   return refreshToken;
 };
 

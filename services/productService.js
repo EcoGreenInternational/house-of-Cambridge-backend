@@ -381,8 +381,6 @@ export const createReview = async (productId, userId, reviewData, files = []) =>
     );
   }
 
-  await User.findByIdAndUpdate(userId, { $inc: { loyaltyPoints: LOYALTY_POINTS_REVIEW } });
-
   return review;
 };
 

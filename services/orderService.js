@@ -14,7 +14,7 @@ import Invoice from '../model/Invoice.js';
 import { validateShippingAddress, validateGuestContact } from '../utils/checkoutValidation.js';
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
 
-const TAX_RATE = process.env.TAX_RATE !== undefined ? Number(process.env.TAX_RATE) : 0.08;
+const TAX_RATE = 0;
 const LOYALTY_EARN_RATE = 50;
 const MAX_LOYALTY_REDEEM_RATIO = 0.25;
 const COD_MAX_PRODUCTS = 3;
@@ -70,19 +70,40 @@ export const createOrder = async (userId, sessionId, orderData) => {
 
 
   const productIds = cart.items.map(i => String(i.product._id || i.product));
-  const products = await Product.find({ _id: { $in: productIds } }).select('stock isActive name').lean();
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select('stock isActive name price discountPrice isFlashSale flashSalePrice variants')
+    .lean();
   const productMap = new Map(products.map(p => [p._id.toString(), p]));
 
+  let verifiedSubtotal = 0;
   for (const item of cart.items) {
     const pid = String(item.product._id || item.product);
     const prod = productMap.get(pid);
     if (!prod || !prod.isActive) throw new ErrorResponse('Product unavailable', 400);
-    if (prod.stock < item.quantity) throw new ErrorResponse(`Insufficient stock for ${prod.name}`, 400);
+
+    const hasFlashSalePrice = prod.isFlashSale === true && Number(prod.flashSalePrice) > 0;
+    let expectedPrice = hasFlashSalePrice ? Number(prod.flashSalePrice) : (prod.discountPrice > 0 ? prod.discountPrice : prod.price);
+    let availableStock = prod.stock;
+
+    if (item.selectedVariant && prod.variants?.length) {
+      const v = prod.variants.find(varItem => varItem.sku === item.selectedVariant.sku || varItem.name === item.selectedVariant.name);
+      if (v) {
+        if (!hasFlashSalePrice && v.price > 0) expectedPrice = v.price;
+        availableStock = v.stock;
+      }
+    }
+
+    if (availableStock < item.quantity) throw new ErrorResponse(`Insufficient stock for ${prod.name}`, 400);
+
+    item.price = expectedPrice;
+    verifiedSubtotal += expectedPrice * item.quantity;
   }
+
+  await cartService.recalculateCartDiscount(cart);
 
   const totalWeightKg = calcTotalWeightKg(cart.items);
   const shippingCost = calcShipping(shippingMethod, totalWeightKg);
-  const subtotal = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const subtotal = verifiedSubtotal;
   const discount = Number(cart.discount) || 0;
 
   const loyaltyUsed = Number(orderData.loyaltyPointsUsed) || 0;
@@ -182,15 +203,18 @@ export const createOrder = async (userId, sessionId, orderData) => {
 
   await Promise.allSettled(cart.items.map(async (item) => {
     const prodId = item.product._id || item.product;
-    await Product.findByIdAndUpdate(prodId, { $inc: { stock: -item.quantity } });
+    await Product.findOneAndUpdate(
+      { _id: prodId, stock: { $gte: item.quantity } },
+      { $inc: { stock: -item.quantity } }
+    );
     if (item.selectedVariant?.sku) {
       await Product.updateOne(
-        { _id: prodId, 'variants.sku': item.selectedVariant.sku },
+        { _id: prodId, 'variants.sku': item.selectedVariant.sku, 'variants.stock': { $gte: item.quantity } },
         { $inc: { 'variants.$.stock': -item.quantity } }
       );
     } else if (item.selectedVariant?.name) {
       await Product.updateOne(
-        { _id: prodId, 'variants.name': item.selectedVariant.name },
+        { _id: prodId, 'variants.name': item.selectedVariant.name, 'variants.stock': { $gte: item.quantity } },
         { $inc: { 'variants.$.stock': -item.quantity } }
       );
     }

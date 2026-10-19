@@ -60,10 +60,18 @@ export const getOrder = async (req, res, next) => {
     if (!order) return next(new ErrorResponse('Order not found', 404));
 
   
-    if (req.user) {
-      const isAdmin = ['admin', 'superadmin', 'manager'].includes(req.user.role);
-      if (!isAdmin && order.user && String(order.user._id || order.user) !== String(req.user._id)) {
-        return next(new ErrorResponse('Access denied', 403));
+    const isAdmin = req.user && ['admin', 'superadmin', 'manager'].includes(req.user.role);
+    if (!isAdmin) {
+      if (order.user) {
+        if (!req.user || String(order.user._id || order.user) !== String(req.user._id)) {
+          return next(new ErrorResponse('Access denied', 403));
+        }
+      } else {
+        const guestEmail = (req.query.email || req.headers['x-guest-email'] || '').trim().toLowerCase();
+        const matchesEmail = guestEmail && order.guestEmail && guestEmail === order.guestEmail.toLowerCase();
+        if (!matchesEmail) {
+          return next(new ErrorResponse('Verification required to view guest order', 403));
+        }
       }
     }
 
