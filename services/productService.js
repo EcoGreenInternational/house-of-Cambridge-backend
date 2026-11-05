@@ -3,6 +3,7 @@ import Review from '../model/Review.js';
 import Order from '../model/Order.js';
 import Product from '../model/Product.js';
 import Category from '../model/Category.js';
+import Brand from '../model/Brand.js';
 import ErrorResponse from '../utils/errorResponse.js';
 import ApiFeatures from '../utils/apiFeatures.js';
 import { uploadBuffer, deleteResource } from '../utils/cloudinaryHelper.js';
@@ -85,15 +86,80 @@ export const generateProductCode = async () => {
   return `${PRODUCT_CODE_PREFIX}${String(nextNumber).padStart(PRODUCT_CODE_LENGTH, '0')}`;
 };
 
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const buildKeywordSearchFilter = async (keyword) => {
+  if (!keyword || typeof keyword !== 'string') return null;
+  const rawKeyword = keyword.trim();
+  if (!rawKeyword) return null;
+
+  const rawTokens = rawKeyword.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+  if (rawTokens.length === 0) return null;
+
+  const tokenData = rawTokens.map((token) => {
+    let clean = token.replace(/^[^\w]+|[^\w]+$/g, '');
+    if (!clean) clean = token;
+    clean = clean.replace(/['’]s$/i, '');
+
+    let stem = clean;
+    if (stem.length > 3 && stem.toLowerCase().endsWith('s') && !stem.toLowerCase().endsWith('ss')) {
+      stem = stem.slice(0, -1);
+    }
+
+    const escapedStem = escapeRegex(stem || token);
+    const regex = new RegExp(escapedStem + "['’]?s?", 'i');
+    return { token, stem, regex };
+  });
+
+  const brandMatches = await Promise.all(
+    tokenData.map(({ regex }) => Brand.find({ name: regex, isActive: true }).select('_id').lean())
+  );
+  const categoryMatches = await Promise.all(
+    tokenData.map(({ regex }) => Category.find({ name: regex, isActive: true }).select('_id').lean())
+  );
+
+  const tokenConditions = tokenData.map(({ regex }, index) => {
+    const brandIds = (brandMatches[index] || []).map((b) => b._id);
+    const categoryIds = (categoryMatches[index] || []).map((c) => c._id);
+
+    const condition = {
+      $or: [
+        { name: regex },
+        { description: regex },
+        { shortDescription: regex },
+        { tags: regex },
+        { productCode: regex },
+        { sku: regex },
+      ],
+    };
+
+    if (brandIds.length > 0) {
+      condition.$or.push({ brand: { $in: brandIds } });
+    }
+    if (categoryIds.length > 0) {
+      condition.$or.push({ category: { $in: categoryIds } });
+    }
+
+    return condition;
+  });
+
+  return {
+    rawKeyword,
+    tokenData,
+    tokenConditions,
+  };
+};
+
 export const getProducts = async (queryStr) => {
   const rawLimit  = parseInt(queryStr.limit, 10);
   const resPerPage = ALLOWED_LIST_LIMITS.includes(rawLimit) ? rawLimit : DEFAULT_LIST_LIMIT;
+  const currentPage = Math.max(1, Number(queryStr.page) || 1);
 
   const processedQuery = { ...queryStr };
 
   if (processedQuery.category) {
     if (OBJECT_ID_RE.test(processedQuery.category)) {
-      // valid ObjectId — pass through
+      // valid ObjectId - pass through
     } else if (typeof processedQuery.category === 'string') {
       const cat = await Category.findOne({
         slug:     processedQuery.category.slice(0, 100),
@@ -105,15 +171,98 @@ export const getProducts = async (queryStr) => {
     }
   }
 
+  if (processedQuery.brand) {
+    if (OBJECT_ID_RE.test(processedQuery.brand)) {
+      // valid ObjectId - pass through
+    } else if (typeof processedQuery.brand === 'string') {
+      const b = await Brand.findOne({
+        slug:     processedQuery.brand.slice(0, 100),
+        isActive: true,
+      }).select('_id').lean();
+      processedQuery.brand = b ? b._id.toString() : '__none__';
+    } else {
+      processedQuery.brand = '__none__';
+    }
+  }
+
+  const baseFilter = { isActive: true, showInUserView: { $ne: false } };
+  let searchResultInfo = null;
+
+  if (processedQuery.keyword) {
+    const searchFilter = await buildKeywordSearchFilter(processedQuery.keyword);
+    if (searchFilter && searchFilter.tokenConditions.length > 0) {
+      searchResultInfo = searchFilter;
+      const { tokenConditions } = searchFilter;
+
+      if (tokenConditions.length === 1) {
+        Object.assign(baseFilter, tokenConditions[0]);
+      } else {
+        const andFilter = { ...baseFilter, $and: tokenConditions };
+        const andCount = await Product.countDocuments(andFilter);
+        if (andCount > 0) {
+          baseFilter.$and = tokenConditions;
+        } else {
+          baseFilter.$or = tokenConditions;
+        }
+      }
+    }
+    delete processedQuery.keyword;
+  }
+
+  const isDefaultSort = !queryStr.sort || queryStr.sort === 'newest';
+
   const features = new ApiFeatures(
-    Product.find({ isActive: true, showInUserView: { $ne: false } }).populate('category', 'name slug').populate('brand', 'name slug'),
+    Product.find(baseFilter).populate('category', 'name slug').populate('brand', 'name slug'),
     processedQuery,
-  ).search().filter().sort();
+  ).filter().sort();
 
   const countFeatures = new ApiFeatures(
-    Product.find({ isActive: true, showInUserView: { $ne: false } }),
+    Product.find(baseFilter),
     processedQuery,
-  ).search().filter();
+  ).filter();
+
+  if (searchResultInfo && isDefaultSort) {
+    const [total, rawProducts] = await Promise.all([
+      countFeatures.query.countDocuments(),
+      features.query.limit(300),
+    ]);
+
+    const scoredProducts = rawProducts.map((p) => {
+      const obj = p.toObject ? p.toObject() : p;
+      let score = 0;
+      const pName = (obj.name || '').toLowerCase();
+      const kw = searchResultInfo.rawKeyword.toLowerCase();
+      const brandName = (obj.brand?.name || '').toLowerCase();
+      const catName = (obj.category?.name || '').toLowerCase();
+      const tags = Array.isArray(obj.tags) ? obj.tags.map((t) => String(t).toLowerCase()) : [];
+      const shortDesc = (obj.shortDescription || '').toLowerCase();
+      const desc = (obj.description || '').toLowerCase();
+
+      if (pName === kw) score += 300;
+      else if (pName.startsWith(kw)) score += 150;
+      else if (pName.includes(kw)) score += 100;
+
+      searchResultInfo.tokenData.forEach(({ regex }) => {
+        if (regex.test(pName)) score += 50;
+        if (regex.test(brandName)) score += 45;
+        if (regex.test(catName)) score += 25;
+        if (tags.some((t) => regex.test(t))) score += 20;
+        if (regex.test(shortDesc)) score += 15;
+        if (regex.test(desc)) score += 5;
+      });
+
+      if (obj.ratings) score += obj.ratings * 2;
+
+      return { product: p, score };
+    });
+
+    scoredProducts.sort((a, b) => b.score - a.score);
+
+    const skip = resPerPage * (currentPage - 1);
+    const products = scoredProducts.slice(skip, skip + resPerPage).map((s) => s.product);
+
+    return { products, total, resPerPage };
+  }
 
   const [total, products] = await Promise.all([
     countFeatures.query.countDocuments(),
