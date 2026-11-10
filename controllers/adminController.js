@@ -16,6 +16,8 @@ import * as productService from '../services/productService.js';
 import { awardLoyaltyPoints } from '../utils/loyaltyHelper.js';
 import LoyaltyTransaction from '../model/LoyaltyTransaction.js';
 import SiteSetting from '../model/SiteSetting.js';
+import CampaignSetting from '../model/CampaignSetting.js';
+import DiscountRequest from '../model/DiscountRequest.js';
 import { 
   ORDER_STATUSES, 
   PAYMENT_STATUSES, 
@@ -454,13 +456,14 @@ export const updateOrderStatus = async (req, res, next) => {
 export const getAdminProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePage(req.query);
-    const { category, isActive, showInUserView } = req.query;
+    const { category, isActive, showInUserView, approvalStatus } = req.query;
     const search = sanitiseRegex(req.query.search);
 
     const query = {};
     if (search) query.$or = [
       { name: { $regex: search, $options: 'i' } },
       { sku:  { $regex: search, $options: 'i' } },
+      { productCode: { $regex: search, $options: 'i' } },
     ];
     if (category) {
       if (!OBJECT_ID_RE.test(category)) return next(new ErrorResponse('Invalid category ID', 400));
@@ -471,8 +474,20 @@ export const getAdminProducts = async (req, res, next) => {
       query.showInUserView = showInUserView === 'true' ? { $ne: false } : false;
     }
 
+    if (approvalStatus && approvalStatus !== 'all') {
+      query.approvalStatus = approvalStatus;
+    }
+
     const [products, total] = await Promise.all([
-      Product.find(query).populate('category', 'name').populate('brand', 'name').sort('-createdAt').skip(skip).limit(limit).lean(),
+      Product.find(query)
+        .populate('category', 'name')
+        .populate('brand', 'name')
+        .populate('requestedBy', 'name email')
+        .populate('approvedBy', 'name email')
+        .sort('-createdAt')
+        .skip(skip)
+        .limit(limit)
+        .lean(),
       Product.countDocuments(query),
     ]);
 
@@ -484,6 +499,17 @@ export const createProduct = async (req, res, next) => {
   try {
     if (!req.body.productCode) {
       req.body.productCode = await productService.generateProductCode();
+    }
+
+    const isSuperAdmin = req.user?.role === 'superadmin';
+    if (!isSuperAdmin) {
+      req.body.approvalStatus = 'pending';
+      req.body.showInUserView = false;
+      req.body.requestedBy = req.user?._id;
+    } else {
+      req.body.approvalStatus = req.body.approvalStatus || 'approved';
+      req.body.approvedBy = req.user?._id;
+      req.body.approvedAt = new Date();
     }
 
     if (req.body.attributes && typeof req.body.attributes === 'string') {
@@ -562,6 +588,17 @@ export const createProduct = async (req, res, next) => {
 export const updateProduct = async (req, res, next) => {
   try {
     validateObjectId(req.params.id, 'product ID');
+
+    const isSuperAdmin = req.user?.role === 'superadmin';
+    if (!isSuperAdmin) {
+      req.body.approvalStatus = 'pending';
+      req.body.showInUserView = false;
+      req.body.requestedBy = req.user?._id;
+    } else {
+      if (req.body.approvalStatus === undefined) {
+        req.body.approvalStatus = 'approved';
+      }
+    }
 
     if (req.body.attributes && typeof req.body.attributes === 'string') {
       try {
@@ -1210,4 +1247,471 @@ export const broadcastNotification = async (req, res, next) => {
 
     return res.json({ success: true, message: `Notification sent to ${users.length} user(s)` });
   } catch (err) { return next(err); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Super Admin Approvals System
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getApprovals = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePage(req.query);
+    const { status = 'pending', search: rawSearch } = req.query;
+    const search = sanitiseRegex(rawSearch);
+
+    const query = {};
+    if (status && status !== 'all') {
+      query.approvalStatus = status;
+    }
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { productCode: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const [products, total, pendingCount] = await Promise.all([
+      Product.find(query)
+        .populate('category', 'name')
+        .populate('brand', 'name')
+        .populate('requestedBy', 'name email')
+        .populate('approvedBy', 'name email')
+        .sort('-updatedAt')
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(query),
+      Product.countDocuments({ approvalStatus: 'pending' }),
+    ]);
+
+    return res.json({
+      success: true,
+      products,
+      total,
+      pendingCount,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getApprovalStats = async (req, res, next) => {
+  try {
+    const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      Product.countDocuments({ approvalStatus: 'pending' }),
+      Product.countDocuments({ approvalStatus: 'approved' }),
+      Product.countDocuments({ approvalStatus: 'rejected' }),
+    ]);
+
+    return res.json({
+      success: true,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const approveProduct = async (req, res, next) => {
+  try {
+    validateObjectId(req.params.id, 'product ID');
+
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      {
+        approvalStatus: 'approved',
+        showInUserView: true,
+        approvalNote: '',
+        approvedBy: req.user._id,
+        approvedAt: new Date(),
+      },
+      { returnDocument: 'after', runValidators: true }
+    )
+      .populate('category', 'name')
+      .populate('brand', 'name')
+      .populate('requestedBy', 'name email')
+      .populate('approvedBy', 'name email');
+
+    if (!product) return next(new ErrorResponse('Product not found', 404));
+
+    return res.json({ success: true, product, message: 'Product approved and published successfully' });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const rejectProduct = async (req, res, next) => {
+  try {
+    validateObjectId(req.params.id, 'product ID');
+
+    const note = (req.body.note || req.body.reason || '').trim().slice(0, 500);
+
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      {
+        approvalStatus: 'rejected',
+        showInUserView: false,
+        approvalNote: note || 'Product update was rejected by Super Admin',
+        approvedBy: req.user._id,
+        approvedAt: new Date(),
+      },
+      { returnDocument: 'after', runValidators: true }
+    )
+      .populate('category', 'name')
+      .populate('brand', 'name')
+      .populate('requestedBy', 'name email')
+      .populate('approvedBy', 'name email');
+
+    if (!product) return next(new ErrorResponse('Product not found', 404));
+
+    return res.json({ success: true, product, message: 'Product rejected' });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const bulkApproveProducts = async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return next(new ErrorResponse('Please provide an array of product IDs to approve', 400));
+    }
+
+    const validIds = ids.filter((id) => OBJECT_ID_RE.test(id));
+    if (validIds.length === 0) {
+      return next(new ErrorResponse('No valid product IDs provided', 400));
+    }
+
+    const result = await Product.updateMany(
+      { _id: { $in: validIds } },
+      {
+        approvalStatus: 'approved',
+        showInUserView: true,
+        approvalNote: '',
+        approvedBy: req.user._id,
+        approvedAt: new Date(),
+      }
+    );
+
+    return res.json({
+      success: true,
+      modifiedCount: result.modifiedCount,
+      message: `${result.modifiedCount} product(s) approved and published`,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global Discount Management (11:11 Mega Discount System)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const applyGlobalDiscountToProducts = async (percent) => {
+  const products = await Product.find({ isActive: true });
+  if (!products.length) return 0;
+
+  const bulkOps = products.map((p) => {
+    const originalPrice = p.comparePrice > p.price ? p.comparePrice : p.price;
+    const discPrice = Math.max(0, Math.round(originalPrice * (1 - percent / 100)));
+
+    const updatedVariants = (p.variants || []).map((v) => {
+      const vObj = v.toObject ? v.toObject() : v;
+      if (vObj.price > 0 || vObj.comparePrice > 0) {
+        const vOriginal = vObj.comparePrice > vObj.price ? vObj.comparePrice : vObj.price;
+        const vDiscPrice = Math.max(0, Math.round(vOriginal * (1 - percent / 100)));
+        return {
+          ...vObj,
+          comparePrice: vOriginal,
+          price: vDiscPrice,
+        };
+      }
+      return vObj;
+    });
+
+    return {
+      updateOne: {
+        filter: { _id: p._id },
+        update: {
+          $set: {
+            discountPercent: percent,
+            discountPrice: discPrice,
+            comparePrice: originalPrice,
+            variants: updatedVariants,
+          },
+        },
+      },
+    };
+  });
+
+  const result = await Product.bulkWrite(bulkOps);
+  return result.modifiedCount || 0;
+};
+
+export const resetGlobalDiscountFromProducts = async () => {
+  const products = await Product.find({
+    $or: [{ discountPrice: { $gt: 0 } }, { discountPercent: { $gt: 0 } }],
+  });
+  if (!products.length) return 0;
+
+  const bulkOps = products.map((p) => {
+    const origPrice = p.comparePrice > p.price ? p.comparePrice : p.price;
+    const revertedVariants = (p.variants || []).map((v) => {
+      const vObj = v.toObject ? v.toObject() : v;
+      if (vObj.comparePrice > 0) {
+        return {
+          ...vObj,
+          price: vObj.comparePrice,
+          comparePrice: 0,
+        };
+      }
+      return vObj;
+    });
+
+    return {
+      updateOne: {
+        filter: { _id: p._id },
+        update: {
+          $set: {
+            discountPercent: 0,
+            discountPrice: 0,
+            price: origPrice,
+            variants: revertedVariants,
+          },
+        },
+      },
+    };
+  });
+
+  const result = await Product.bulkWrite(bulkOps);
+  return result.modifiedCount || 0;
+};
+
+export const manageGlobalDiscount = async (req, res, next) => {
+  try {
+    const isSuperAdmin = req.user?.role === 'superadmin';
+    const action = req.body.action === 'reset' ? 'reset' : 'apply';
+    const percent = Math.min(100, Math.max(0, Number(req.body.discountPercent || req.body.percent || 5)));
+    const reason = (req.body.reason || '11:11 Mega Discount').trim().slice(0, 500);
+
+    if (isSuperAdmin) {
+      let modified = 0;
+      if (action === 'reset') {
+        modified = await resetGlobalDiscountFromProducts();
+      } else {
+        modified = await applyGlobalDiscountToProducts(percent);
+      }
+      return res.json({
+        success: true,
+        immediate: true,
+        modifiedCount: modified,
+        discountPercent: action === 'reset' ? 0 : percent,
+        message: action === 'reset'
+          ? `Global discount removed across ${modified} products.`
+          : `Global ${percent}% discount applied across ${modified} products!`,
+      });
+    }
+
+    // Regular admin -> creates a pending approval request
+    const discountReq = await DiscountRequest.create({
+      discountPercent: percent,
+      action,
+      reason,
+      requestedBy: req.user._id,
+      status: 'pending',
+    });
+
+    return res.json({
+      success: true,
+      pendingApproval: true,
+      request: discountReq,
+      message: `Global discount (${action === 'reset' ? 'Reset' : percent + '%'}) submitted for Super Admin approval.`,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getGlobalDiscountStatus = async (req, res, next) => {
+  try {
+    const [sampleDiscounted, discountedCount, pendingRequests] = await Promise.all([
+      Product.findOne({ discountPercent: { $gt: 0 } }).select('discountPercent').lean(),
+      Product.countDocuments({ discountPercent: { $gt: 0 } }),
+      DiscountRequest.find({ status: 'pending' }).populate('requestedBy', 'name email').sort('-createdAt').lean(),
+    ]);
+
+    return res.json({
+      success: true,
+      activeDiscountPercent: sampleDiscounted?.discountPercent || 0,
+      discountedProductsCount: discountedCount,
+      pendingRequests,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const approveGlobalDiscountRequest = async (req, res, next) => {
+  try {
+    validateObjectId(req.params.id, 'discount request ID');
+
+    const discountReq = await DiscountRequest.findById(req.params.id);
+    if (!discountReq) return next(new ErrorResponse('Discount request not found', 404));
+    if (discountReq.status !== 'pending') {
+      return next(new ErrorResponse(`Request is already ${discountReq.status}`, 400));
+    }
+
+    let modified = 0;
+    if (discountReq.action === 'reset') {
+      modified = await resetGlobalDiscountFromProducts();
+    } else {
+      modified = await applyGlobalDiscountToProducts(discountReq.discountPercent);
+    }
+
+    discountReq.status = 'approved';
+    discountReq.approvedBy = req.user._id;
+    discountReq.approvedAt = new Date();
+    await discountReq.save();
+
+    return res.json({
+      success: true,
+      request: discountReq,
+      modifiedCount: modified,
+      message: discountReq.action === 'reset'
+        ? 'Global discount reset approved and applied.'
+        : `Global ${discountReq.discountPercent}% discount approved and applied to ${modified} products!`,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const rejectGlobalDiscountRequest = async (req, res, next) => {
+  try {
+    validateObjectId(req.params.id, 'discount request ID');
+
+    const discountReq = await DiscountRequest.findById(req.params.id);
+    if (!discountReq) return next(new ErrorResponse('Discount request not found', 404));
+
+    discountReq.status = 'rejected';
+    discountReq.rejectionNote = (req.body.note || req.body.reason || 'Rejected by Super Admin').trim().slice(0, 500);
+    discountReq.approvedBy = req.user._id;
+    discountReq.approvedAt = new Date();
+    await discountReq.save();
+
+    return res.json({
+      success: true,
+      request: discountReq,
+      message: 'Global discount request rejected.',
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+
+export const getCampaignSetting = async (req, res, next) => {
+  try {
+    let campaign = await CampaignSetting.findOne({ key: 'active_campaign' })
+      .populate('updatedBy', 'name email')
+      .lean();
+    if (!campaign) {
+      campaign = await CampaignSetting.create({ key: 'active_campaign' });
+    }
+    const [activeDiscounted, sampleDiscounted] = await Promise.all([
+      Product.countDocuments({ discountPercent: { $gt: 0 } }),
+      Product.findOne({ discountPercent: { $gt: 0 } }).select('discountPercent').lean(),
+    ]);
+
+    return res.json({
+      success: true,
+      campaign,
+      activeDiscountPercent: sampleDiscounted?.discountPercent || 0,
+      discountedProductsCount: activeDiscounted,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const updateCampaignSetting = async (req, res, next) => {
+  try {
+    const isSuperAdmin = req.user?.role === 'superadmin';
+    const {
+      theme,
+      campaignName,
+      badgeText,
+      heading,
+      subheading,
+      discountPercent,
+      greetingText,
+      ctaText,
+      isEnabled,
+      updateAllProductPrices,
+    } = req.body;
+
+    const percent = Math.min(100, Math.max(0, Number(discountPercent ?? 5)));
+
+    if (!isSuperAdmin) {
+      const discountReq = await DiscountRequest.create({
+        discountPercent: percent,
+        action: percent === 0 ? 'reset' : 'apply',
+        reason: `Campaign update: ${campaignName || 'Special Campaign'} (${percent}% discount, Theme: ${theme || 'default'})`,
+        requestedBy: req.user._id,
+        status: 'pending',
+      });
+
+      return res.json({
+        success: true,
+        pendingApproval: true,
+        request: discountReq,
+        message: 'Campaign & discount changes submitted for Super Admin approval.',
+      });
+    }
+
+    const updatePayload = {
+      updatedBy: req.user._id,
+    };
+    if (theme) updatePayload.theme = theme;
+    if (campaignName !== undefined) updatePayload.campaignName = String(campaignName).trim();
+    if (badgeText !== undefined) updatePayload.badgeText = String(badgeText).trim();
+    if (heading !== undefined) updatePayload.heading = String(heading).trim();
+    if (subheading !== undefined) updatePayload.subheading = String(subheading).trim();
+    if (discountPercent !== undefined) updatePayload.discountPercent = percent;
+    if (greetingText !== undefined) updatePayload.greetingText = String(greetingText).trim();
+    if (ctaText !== undefined) updatePayload.ctaText = String(ctaText).trim();
+    if (isEnabled !== undefined) updatePayload.isEnabled = Boolean(isEnabled);
+
+    const campaign = await CampaignSetting.findOneAndUpdate(
+      { key: 'active_campaign' },
+      { $set: updatePayload },
+      { new: true, upsert: true, runValidators: true }
+    );
+
+    let modifiedProducts = 0;
+    if (updateAllProductPrices === true || updateAllProductPrices === 'true') {
+      if (percent > 0 && updatePayload.isEnabled !== false) {
+        modifiedProducts = await applyGlobalDiscountToProducts(percent);
+      } else {
+        modifiedProducts = await resetGlobalDiscountFromProducts();
+      }
+    }
+
+    return res.json({
+      success: true,
+      campaign,
+      modifiedProducts,
+      message: updateAllProductPrices
+        ? `Campaign saved and ${percent}% discount applied across ${modifiedProducts} products!`
+        : 'Campaign popup & settings updated successfully!',
+    });
+  } catch (err) {
+    return next(err);
+  }
 };

@@ -13,6 +13,7 @@ router.get('/featured', ctrl.getFeaturedProducts);
 router.get('/popular', ctrl.getPopularProducts);
 router.get('/new-arrivals', ctrl.getNewArrivalProducts);
 router.get('/categories', ctrl.getCategories);
+router.get('/campaign-popup', ctrl.getActiveCampaign);
 router.get('/:id', param('id').isMongoId(), validate, ctrl.getProduct);
 
 router.post(
