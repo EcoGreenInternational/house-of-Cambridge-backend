@@ -21,18 +21,15 @@ const sanitiseListQuery = (query) => ({
 
 export const createOrder = async (req, res, next) => {
   try {
-    const userId = req.user?._id ?? null;
-    const sessionId = req.cookies?.sessionId ?? req.headers['x-session-id'] ?? null;
-
-    if (!userId && !sessionId) {
-      return next(new ErrorResponse('No session or user identity found', 401));
+    if (!req.user?._id) {
+      return next(new ErrorResponse('Authentication required', 401));
     }
 
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       return next(new ErrorResponse('Invalid order payload', 400));
     }
 
-    const order = await orderService.createOrder(userId, sessionId, req.body);
+    const order = await orderService.createOrder(req.user._id, null, req.body);
     return res.status(201).json({ success: true, order });
   } catch (err) {
     return next(err);

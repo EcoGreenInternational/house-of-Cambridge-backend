@@ -11,27 +11,55 @@ export default class ApiFeatures {
     this.queryStr = queryStr;
   }
 
-search() {
-  if (this.queryStr.keyword) {
-    const escaped = this.queryStr.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escaped, 'i');
-    this.query = this.query.find({
-      $or: [
-        { name: regex },
-        { description: regex },
-        { brand: regex },
-      ],
-    });
+  search() {
+    if (this.queryStr.keyword) {
+      const rawKeyword = String(this.queryStr.keyword).trim();
+      if (rawKeyword) {
+        const tokens = rawKeyword.split(/\s+/).filter(Boolean);
+        const tokenConditions = tokens.map((token) => {
+          let clean = token.replace(/^[^\w]+|[^\w]+$/g, '').replace(/['’]s$/i, '');
+          let stem = clean;
+          if (stem.length > 3 && stem.toLowerCase().endsWith('s') && !stem.toLowerCase().endsWith('ss')) {
+            stem = stem.slice(0, -1);
+          }
+          const escaped = (stem || token).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped + "['’]?s?", 'i');
+          return {
+            $or: [
+              { name: regex },
+              { description: regex },
+              { shortDescription: regex },
+              { tags: regex },
+              { productCode: regex },
+              { sku: regex },
+            ],
+          };
+        });
+
+        if (tokenConditions.length === 1) {
+          this.query = this.query.find(tokenConditions[0]);
+        } else if (tokenConditions.length > 1) {
+          this.query = this.query.find({ $and: tokenConditions });
+        }
+      }
+    }
+    return this;
   }
-  return this;
-}
 
   filter() {
     if (this.queryStr.category) {
-      this.query = this.query.find({ category: this.queryStr.category });
+      if (this.queryStr.category === '__none__') {
+        this.query = this.query.find({ _id: null });
+      } else {
+        this.query = this.query.find({ category: this.queryStr.category });
+      }
     }
     if (this.queryStr.brand) {
-      this.query = this.query.find({ brand: this.queryStr.brand });
+      if (this.queryStr.brand === '__none__') {
+        this.query = this.query.find({ _id: null });
+      } else {
+        this.query = this.query.find({ brand: this.queryStr.brand });
+      }
     }
     if (this.queryStr.minPrice || this.queryStr.maxPrice) {
       const priceFilter = {};

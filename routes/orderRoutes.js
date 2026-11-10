@@ -18,7 +18,7 @@ const orderIdParam = (name = 'id') =>
   });
 
 
-router.post('/', optionalAuth, ctrl.createOrder);
+router.post('/', protect, ctrl.createOrder);
 
 
 router.get('/my-orders', protect, ctrl.getMyOrders);
