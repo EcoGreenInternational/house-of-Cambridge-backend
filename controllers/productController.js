@@ -3,6 +3,7 @@ import * as productRepo from '../repositories/productRepository.js';
 import Category from '../model/Category.js';
 import Product from '../model/Product.js';
 import SiteSetting from '../model/SiteSetting.js';
+import CampaignSetting from '../model/CampaignSetting.js';
 import ErrorResponse from '../utils/errorResponse.js';
 
 const OBJECT_ID_RE = /^[a-f\d]{24}$/i;
@@ -216,6 +217,29 @@ export const getCategories = async (req, res, next) => {
       .lean();
 
     return res.json({ success: true, count: categories.length, categories });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getActiveCampaign = async (req, res, next) => {
+  try {
+    let campaign = await CampaignSetting.findOne({ key: 'active_campaign' }).lean();
+    if (!campaign) {
+      campaign = {
+        key: 'active_campaign',
+        isEnabled: true,
+        theme: '11_11',
+        campaignName: '11:11 Mega Sale',
+        badgeText: '11:11 MEGA SHOPPING FESTIVAL',
+        heading: '11 : 11',
+        subheading: 'BIGGEST SALE OF THE YEAR',
+        discountPercent: 5,
+        greetingText: 'Applied automatically on EVERY product across the entire store!',
+        ctaText: 'Claim 5% OFF & Shop Now',
+      };
+    }
+    return res.json({ success: true, campaign });
   } catch (err) {
     return next(err);
   }

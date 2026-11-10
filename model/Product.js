@@ -33,6 +33,15 @@ const productSchema = new mongoose.Schema(
     isNewArrival: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     showInUserView: { type: Boolean, default: true },
+    approvalStatus: {
+      type: String,
+      enum: ['draft', 'pending', 'approved', 'rejected'],
+      default: 'approved',
+    },
+    approvalNote: { type: String, default: '', maxlength: 500 },
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedAt: { type: Date },
     weight: { type: Number, default: 0, min: 0 },
     usageInstructions: [{ type: String, maxlength: 500 }],
     variantAttributes: [
@@ -67,6 +76,7 @@ productSchema.index({ price: 1 });
 productSchema.index({ ratings: -1 });
 productSchema.index({ isActive: 1, showInUserView: 1, isFeatured: 1 });
 productSchema.index({ isActive: 1, showInUserView: 1, isFlashSale: 1 });
+productSchema.index({ approvalStatus: 1 });
 
 const Product = mongoose.model('Product', productSchema);
 
