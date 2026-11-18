@@ -1327,7 +1327,10 @@ export const getHeroBanner = async (req, res, next) => {
     const banner = await SiteSetting.findOne({ key: 'heroBanner' });
     if (!banner) return res.json({ success: true, banner: null });
     return res.json({ success: true, banner });
-
+  } catch (err) {
+    return next(err);
+  }
+};
 // ─────────────────────────────────────────────────────────────────────────────
 // Super Admin Approvals System
 // ─────────────────────────────────────────────────────────────────────────────
