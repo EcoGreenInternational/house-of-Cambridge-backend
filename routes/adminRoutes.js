@@ -173,4 +173,10 @@ router.post(
   ctrl.broadcastNotification,
 );
 
+// Hero Banner routes
+router.get('/hero-banner', ...admin, ctrl.getHeroBanner);
+router.post('/hero-banner', ...admin, upload.single('image'), ctrl.createHeroBanner);
+router.put('/hero-banner/:id', ...admin, upload.single('image'), ctrl.updateHeroBanner);
+router.delete('/hero-banner/:id', ...admin, ctrl.deleteHeroBanner);
+
 export default router;

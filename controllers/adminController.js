@@ -1211,3 +1211,73 @@ export const broadcastNotification = async (req, res, next) => {
     return res.json({ success: true, message: `Notification sent to ${users.length} user(s)` });
   } catch (err) { return next(err); }
 };
+
+// Hero Banner CRUD handlers
+export const getHeroBanner = async (req, res, next) => {
+  try {
+    const banner = await SiteSetting.findOne({ key: 'heroBanner' });
+    if (!banner) return res.json({ success: true, banner: null });
+    return res.json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const createHeroBanner = async (req, res, next) => {
+  try {
+    // Expect fields: title, subtitle, buttons (JSON string)
+    const { title = '', subtitle = '', buttons = '[]' } = req.body;
+    let image = { public_id: '', url: '' };
+    if (req.file) {
+      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
+      image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+    }
+    const banner = await SiteSetting.create({
+      key: 'heroBanner',
+      type: 'heroBanner',
+      title,
+      subtitle,
+      buttons: JSON.parse(buttons),
+      image,
+    });
+    return res.status(201).json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const updateHeroBanner = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, subtitle, buttons } = req.body;
+    const update = {};
+    if (title !== undefined) update.title = title;
+    if (subtitle !== undefined) update.subtitle = subtitle;
+    if (buttons !== undefined) update.buttons = JSON.parse(buttons);
+    if (req.file) {
+      // delete old image if exists
+      const old = await SiteSetting.findById(id);
+      if (old?.image?.public_id) await deleteResource(old.image.public_id);
+      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
+      update.image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+    }
+    const banner = await SiteSetting.findByIdAndUpdate(id, update, { new: true });
+    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+    return res.json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const deleteHeroBanner = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const banner = await SiteSetting.findById(id);
+    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+    if (banner.image?.public_id) await deleteResource(banner.image.public_id);
+    await SiteSetting.findByIdAndDelete(id);
+    return res.json({ success: true, message: 'Banner deleted' });
+  } catch (err) {
+    return next(err);
+  }
+};
