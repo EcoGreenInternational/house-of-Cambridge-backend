@@ -185,7 +185,11 @@ export const getProducts = async (queryStr) => {
     }
   }
 
-  const baseFilter = { isActive: true, showInUserView: { $ne: false } };
+  const baseFilter = {
+    isActive: true,
+    showInUserView: { $ne: false },
+    approvalStatus: { $nin: ['pending', 'rejected', 'draft'] },
+  };
   let searchResultInfo = null;
 
   if (processedQuery.keyword) {
@@ -276,7 +280,12 @@ export const getProductById = async (id) => {
   if (!OBJECT_ID_RE.test(id)) throw new ErrorResponse('Invalid product ID', 400);
 
   const product = await productRepo.findById(id);
-  if (!product || !product.isActive || product.showInUserView === false) throw new ErrorResponse('Product not found', 404);
+  if (
+    !product ||
+    !product.isActive ||
+    product.showInUserView === false ||
+    ['pending', 'rejected', 'draft'].includes(product.approvalStatus)
+  ) throw new ErrorResponse('Product not found', 404);
 
   const reviews = await Review.find({ product: id, status: 'approved' })
     .populate('user', 'name avatar')

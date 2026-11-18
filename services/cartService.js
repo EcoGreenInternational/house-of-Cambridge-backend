@@ -37,12 +37,65 @@ const mergeGuestCart = async (userId, sessionId) => {
   await Cart.deleteOne({ _id: guestCart._id });
 };
 
+const refreshCartPrices = async (cart) => {
+  if (!cart?.items?.length) return cart;
+
+  let changed = false;
+  for (const item of cart.items) {
+    const product = item.product;
+    if (!product || typeof product !== 'object') continue;
+
+    const flashSalePrice = Number(product.flashSalePrice);
+    const hasFlashSalePrice = product.isFlashSale === true && Number.isFinite(flashSalePrice) && flashSalePrice > 0;
+    let currentPrice = hasFlashSalePrice
+      ? flashSalePrice
+      : Number(product.discountPrice) > 0
+        ? Number(product.discountPrice)
+        : Number(product.price) || 0;
+
+    if (item.selectedVariant && product.variants?.length) {
+      const selectedVariant = item.selectedVariant;
+      const matchedVariant = product.variants.find((variant) => {
+        if (selectedVariant.sku && variant.sku && selectedVariant.sku === variant.sku) return true;
+        if (selectedVariant.name && variant.name && selectedVariant.name === variant.name) return true;
+        if (selectedVariant.attributes && variant.attributes) {
+          const variantKeys = Object.keys(variant.attributes);
+          const selectedKeys = Object.keys(selectedVariant.attributes);
+          return variantKeys.length === selectedKeys.length && variantKeys.every(
+            (key) => String(variant.attributes[key]) === String(selectedVariant.attributes[key]),
+          );
+        }
+        return false;
+      });
+
+      if (!hasFlashSalePrice && Number(matchedVariant?.price) > 0) {
+        currentPrice = Number(matchedVariant.price);
+      }
+    }
+
+    if (Number(item.price) !== currentPrice) {
+      item.price = currentPrice;
+      changed = true;
+    }
+    if (item.selectedVariant && Number(item.selectedVariant.price) !== currentPrice) {
+      item.selectedVariant.price = currentPrice;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await recalculateCartDiscount(cart);
+    await cart.save();
+  }
+  return cart;
+};
+
 export const getCart = async (userId, sessionId) => {
   if (userId) {
     if (sessionId) await mergeGuestCart(userId, sessionId);
-    return cartRepo.findByUser(userId);
+    return refreshCartPrices(await cartRepo.findByUser(userId));
   }
-  if (sessionId) return cartRepo.findBySession(sessionId);
+  if (sessionId) return refreshCartPrices(await cartRepo.findBySession(sessionId));
   return null;
 };
 

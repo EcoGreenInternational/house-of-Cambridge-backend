@@ -173,10 +173,31 @@ router.post(
   ctrl.broadcastNotification,
 );
 
+ hero-banner-admin
 // Hero Banner routes
 router.get('/hero-banner', ...admin, ctrl.getHeroBanner);
 router.post('/hero-banner', ...admin, upload.single('image'), ctrl.createHeroBanner);
 router.put('/hero-banner/:id', ...admin, upload.single('image'), ctrl.updateHeroBanner);
 router.delete('/hero-banner/:id', ...admin, ctrl.deleteHeroBanner);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Super Admin Approvals System
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/approvals', ...superOnly, ctrl.getApprovals);
+router.get('/approvals/stats', ...superOnly, ctrl.getApprovalStats);
+router.put('/approvals/:id/approve', ...superOnly, mongoId('id'), validate, ctrl.approveProduct);
+router.put('/approvals/:id/reject', ...superOnly, mongoId('id'), validate, ctrl.rejectProduct);
+router.post('/approvals/bulk-approve', ...superOnly, ctrl.bulkApproveProducts);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global Discount System (11:11 Mega Discount)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/campaign', ...admin, ctrl.getCampaignSetting);
+router.put('/campaign', ...admin, ctrl.updateCampaignSetting);
+router.post('/global-discount', ...admin, ctrl.manageGlobalDiscount);
+router.get('/global-discount/status', ...admin, ctrl.getGlobalDiscountStatus);
+router.put('/global-discount/requests/:id/approve', ...superOnly, mongoId('id'), validate, ctrl.approveGlobalDiscountRequest);
+router.put('/global-discount/requests/:id/reject', ...superOnly, mongoId('id'), validate, ctrl.rejectGlobalDiscountRequest);
+ main
 
 export default router;
