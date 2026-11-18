@@ -1429,24 +1429,6 @@ export const approveProduct = async (req, res, next) => {
 };
 
  hero-banner-admin
-export const createHeroBanner = async (req, res, next) => {
-  try {
-    // Expect fields: title, subtitle, buttons (JSON string)
-    const { title = '', subtitle = '', buttons = '[]' } = req.body;
-    let image = { public_id: '', url: '' };
-    if (req.file) {
-      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
-      image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
-    }
-    const banner = await SiteSetting.create({
-      key: 'heroBanner',
-      type: 'heroBanner',
-      title,
-      subtitle,
-      buttons: JSON.parse(buttons),
-      image,
-    });
-    return res.status(201).json({ success: true, banner });
 
 export const rejectProduct = async (req, res, next) => {
   try {
