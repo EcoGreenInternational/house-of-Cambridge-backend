@@ -33,7 +33,6 @@ const flashSalePosterUpload = multer({
   },
 });
 
-
 const orderIdParam = param('id')
   .custom((val) => {
     const mongoId = /^[a-f\d]{24}$/i.test(val);
@@ -71,9 +70,7 @@ router.post(
 );
 
 router.get('/orders', ...admin, ctrl.getOrders);
-
 router.get('/orders/:id', ...admin, orderIdParam, validate, ctrl.getOrder);
-
 router.put(
   '/orders/:id/status',
   ...admin,
@@ -191,5 +188,11 @@ router.post('/global-discount', ...admin, ctrl.manageGlobalDiscount);
 router.get('/global-discount/status', ...admin, ctrl.getGlobalDiscountStatus);
 router.put('/global-discount/requests/:id/approve', ...superOnly, mongoId('id'), validate, ctrl.approveGlobalDiscountRequest);
 router.put('/global-discount/requests/:id/reject', ...superOnly, mongoId('id'), validate, ctrl.rejectGlobalDiscountRequest);
+
+// Hero Banner admin routes (max 3)
+router.get('/hero-banners/public', ctrl.getHeroBanners);
+router.post('/hero-banners', ...admin, upload.single('image'), ctrl.createHeroBanner);
+router.put('/hero-banners/:id', ...admin, upload.single('image'), ctrl.updateHeroBanner);
+router.delete('/hero-banners/:id', ...admin, ctrl.deleteHeroBanner);
 
 export default router;

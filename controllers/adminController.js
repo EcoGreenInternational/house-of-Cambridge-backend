@@ -107,6 +107,77 @@ const mapCouponData = (body) => {
   return data;
 };
 
+// Hero Banner CRUD (multiple banners)
+import HeroBanner from '../model/HeroBanner.js';
+
+export const getHeroBanners = async (req, res, next) => {
+  try {
+    const banners = await HeroBanner.find().sort({ order: 1 }).lean();
+    return res.json({ success: true, banners });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const createHeroBanner = async (req, res, next) => {
+  try {
+    const count = await HeroBanner.countDocuments();
+    if (count >= 3) return res.status(400).json({ success: false, message: 'Maximum 3 hero banners allowed' });
+    const { title = '', subtitle = '', order = 0, buttons = '[]' } = req.body;
+    let image = { public_id: '', url: '' };
+    if (req.file) {
+      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
+      image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+    }
+    const banner = await HeroBanner.create({
+      title,
+      subtitle,
+      order: Number(order),
+      buttons: JSON.parse(buttons),
+      image,
+    });
+    return res.status(201).json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const updateHeroBanner = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, subtitle, order, buttons } = req.body;
+    const update = {};
+    if (title !== undefined) update.title = title;
+    if (subtitle !== undefined) update.subtitle = subtitle;
+    if (order !== undefined) update.order = Number(order);
+    if (buttons !== undefined) update.buttons = JSON.parse(buttons);
+    if (req.file) {
+      const old = await HeroBanner.findById(id);
+      if (old?.image?.public_id) await deleteResource(old.image.public_id);
+      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
+      update.image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+    }
+    const banner = await HeroBanner.findByIdAndUpdate(id, update, { new: true }).lean();
+    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+    return res.json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const deleteHeroBanner = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const banner = await HeroBanner.findById(id).lean();
+    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+    if (banner.image?.public_id) await deleteResource(banner.image.public_id);
+    await HeroBanner.findByIdAndDelete(id);
+    return res.json({ success: true, message: 'Banner deleted' });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export const getDashboardStats = async (req, res, next) => {
   try {
     const now            = new Date();
@@ -1249,6 +1320,17 @@ export const broadcastNotification = async (req, res, next) => {
   } catch (err) { return next(err); }
 };
 
+ hero-banner-admin
+// Hero Banner CRUD handlers
+export const getHeroBanner = async (req, res, next) => {
+  try {
+    const banner = await SiteSetting.findOne({ key: 'heroBanner' });
+    if (!banner) return res.json({ success: true, banner: null });
+    return res.json({ success: true, banner });
+  } catch (err) {
+    return next(err);
+  }
+};
 // ─────────────────────────────────────────────────────────────────────────────
 // Super Admin Approvals System
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1340,10 +1422,13 @@ export const approveProduct = async (req, res, next) => {
     if (!product) return next(new ErrorResponse('Product not found', 404));
 
     return res.json({ success: true, product, message: 'Product approved and published successfully' });
+ main
   } catch (err) {
     return next(err);
   }
 };
+
+ hero-banner-admin
 
 export const rejectProduct = async (req, res, next) => {
   try {
@@ -1403,10 +1488,13 @@ export const bulkApproveProducts = async (req, res, next) => {
       modifiedCount: result.modifiedCount,
       message: `${result.modifiedCount} product(s) approved and published`,
     });
+main
   } catch (err) {
     return next(err);
   }
 };
+
+ hero-banner-admin
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1610,10 +1698,21 @@ export const rejectGlobalDiscountRequest = async (req, res, next) => {
       request: discountReq,
       message: 'Global discount request rejected.',
     });
+ main
   } catch (err) {
     return next(err);
   }
 };
+
+ hero-banner-admin
+export const deleteHeroBanner = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const banner = await SiteSetting.findById(id);
+    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+    if (banner.image?.public_id) await deleteResource(banner.image.public_id);
+    await SiteSetting.findByIdAndDelete(id);
+    return res.json({ success: true, message: 'Banner deleted' });
 
 
 export const getCampaignSetting = async (req, res, next) => {
@@ -1711,6 +1810,7 @@ export const updateCampaignSetting = async (req, res, next) => {
         ? `Campaign saved and ${percent}% discount applied across ${modifiedProducts} products!`
         : 'Campaign popup & settings updated successfully!',
     });
+ main
   } catch (err) {
     return next(err);
   }
