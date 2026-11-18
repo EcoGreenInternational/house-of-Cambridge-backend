@@ -1495,24 +1495,6 @@ main
 };
 
  hero-banner-admin
-export const updateHeroBanner = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { title, subtitle, buttons } = req.body;
-    const update = {};
-    if (title !== undefined) update.title = title;
-    if (subtitle !== undefined) update.subtitle = subtitle;
-    if (buttons !== undefined) update.buttons = JSON.parse(buttons);
-    if (req.file) {
-      // delete old image if exists
-      const old = await SiteSetting.findById(id);
-      if (old?.image?.public_id) await deleteResource(old.image.public_id);
-      const uploadResult = await uploadBuffer(req.file.buffer, req.file.originalname);
-      update.image = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
-    }
-    const banner = await SiteSetting.findByIdAndUpdate(id, update, { new: true });
-    if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
-    return res.json({ success: true, banner });
 
 
 // ─────────────────────────────────────────────────────────────────────────────
