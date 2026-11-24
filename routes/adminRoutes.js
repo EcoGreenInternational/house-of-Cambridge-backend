@@ -182,14 +182,5 @@ router.put('/approvals/:id/approve', ...superOnly, mongoId('id'), validate, ctrl
 router.put('/approvals/:id/reject', ...superOnly, mongoId('id'), validate, ctrl.rejectProduct);
 router.post('/approvals/bulk-approve', ...superOnly, ctrl.bulkApproveProducts);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Global Discount System (11:11 Mega Discount)
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/campaign', ...admin, ctrl.getCampaignSetting);
-router.put('/campaign', ...admin, ctrl.updateCampaignSetting);
-router.post('/global-discount', ...admin, ctrl.manageGlobalDiscount);
-router.get('/global-discount/status', ...admin, ctrl.getGlobalDiscountStatus);
-router.put('/global-discount/requests/:id/approve', ...superOnly, mongoId('id'), validate, ctrl.approveGlobalDiscountRequest);
-router.put('/global-discount/requests/:id/reject', ...superOnly, mongoId('id'), validate, ctrl.rejectGlobalDiscountRequest);
 
 export default router;
