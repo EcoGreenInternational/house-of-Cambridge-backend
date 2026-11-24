@@ -21,6 +21,7 @@ import brandRoutes   from './routes/brandRoutes.js';
 import invoiceRoutes  from './routes/invoiceRoutes.js';
 import loyaltyRoutes from './routes/loyaltyRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
+import { publicBannerRoutes, adminBannerRoutes } from './routes/bannerRoutes.js';
 
 connectDB();
 
@@ -92,10 +93,12 @@ app.use('/api/products', productRoutes);
 app.use('/api/cart',     cartRoutes);
 app.use('/api/orders',   orderRoutes);
 app.use('/api/users',    userRoutes);
+app.use('/api/admin/banners', adminBannerRoutes);
 app.use('/api/admin',    adminRoutes);
 app.use('/api/upload',   uploadRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/brands',   brandRoutes);
+app.use('/api/banners',  publicBannerRoutes);
 app.use('/api/admin/invoices', invoiceRoutes);
 app.use('/api/loyalty',  loyaltyRoutes);
 app.use('/api/contact',  contactLimiter, contactRoutes);
